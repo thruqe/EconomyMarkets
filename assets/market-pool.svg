@@ -1,0 +1,184 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600" width="100%" height="100%">
+    <defs>
+        <style>
+      .line { stroke: #000000; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .line-thick { stroke: #000000; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; fill: none; }
+      .line-dashed { stroke: #000000; stroke-width: 2; stroke-linecap: round; stroke-dasharray: 6 6; fill: none; }
+      .text-title { font-family: monospace, sans-serif; font-weight: bold; font-size: 16px; fill: #000000; text-anchor: middle; letter-spacing: 1px; }
+      .text-label { font-family: monospace, sans-serif; font-weight: bold; font-size: 12px; fill: #000000; text-anchor: middle; }
+      .text-sub { font-family: sans-serif; font-size: 10px; fill: #000000; text-anchor: middle; }
+      .fill-white { fill: #FFFFFF; }
+      .fill-black { fill: #000000; }
+      .hatch { stroke: #000000; stroke-width: 1; }
+    </style>
+
+        <!-- Hatching Pattern for Pool Water -->
+        <pattern id="waterHatch" width="10" height="10" patternTransform="rotate(45 0 0)"
+            patternUnits="userSpaceOnUse">
+            <line x1="0" y1="0" x2="0" y2="10" class="hatch" />
+        </pattern>
+
+        <!-- Arrow Marker -->
+        <marker id="arrow" viewBox="0 0 10 10" refX="6" refY="5" markerWidth="6" markerHeight="6"
+            orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#000000" />
+        </marker>
+    </defs>
+
+    <!-- Background -->
+    <rect width="800" height="600" fill="#FFFFFF" />
+
+    <!-- ==================== CENTRAL MARKET LIQUIDITY POOL ==================== -->
+    <g transform="translate(400, 310)">
+        <!-- Pool Outer Rim -->
+        <ellipse cx="0" cy="0" rx="220" ry="80" class="line-thick fill-white" />
+        <ellipse cx="0" cy="5" rx="220" ry="80" class="line" />
+        <ellipse cx="0" cy="15" rx="230" ry="85" class="line-thick" />
+
+        <!-- Water Hatching Effect (Liquidity Surface) -->
+        <ellipse cx="0" cy="5" rx="210" ry="70" fill="url(#waterHatch)" opacity="0.15" />
+
+        <!-- Wave Details / Fluid Lines -->
+        <path d="M -140 -10 Q -100 -25 -60 -10 T 20 -10 T 100 -10" class="line" />
+        <path d="M -100 15 Q -60 0 -20 15 T 60 15 T 140 15" class="line" />
+        <path d="M -50 35 Q 0 25 50 35" class="line" />
+
+        <!-- Floating Currency Symbols in the Pool -->
+        <g class="text-title" font-size="20">
+            <text x="-120" y="5" class="fill-black">$</text>
+            <text x="-40" y="-15" class="fill-black">$</text>
+            <text x="50" y="-5" class="fill-black">$</text>
+            <text x="130" y="10" class="fill-black">$</text>
+            <text x="0" y="25" class="fill-black">$</text>
+            <text x="-80" y="30" class="fill-black">$</text>
+            <text x="80" y="30" class="fill-black">$</text>
+        </g>
+
+        <!-- Label -->
+        <rect x="-90" y="-12" width="180" height="24" fill="#FFFFFF" stroke="#000000"
+            stroke-width="2" />
+        <text x="0" y="4" class="text-title">MARKET POOL</text>
+    </g>
+
+    <!-- ==================== THE BIG BOYS (INSTITUTIONS) ==================== -->
+    <!-- Located Left, extracting massive value -->
+    <g transform="translate(160, 130)">
+        <!-- Institutional Building / Vault -->
+        <rect x="-60" y="-50" width="120" height="80" class="line-thick fill-white" />
+        <!-- Roof / Pediment -->
+        <polygon points="-70,-50 0,-85 70,-50" class="line-thick fill-white" />
+        <polygon points="-55,-53 0,-80 55,-53" class="line" />
+        <!-- Pillars -->
+        <line x1="-40" y1="-50" x2="-40" y2="30" class="line-thick" />
+        <line x1="-13" y1="-50" x2="-13" y2="30" class="line-thick" />
+        <line x1="13" y1="-50" x2="13" y2="30" class="line-thick" />
+        <line x1="40" y1="-50" x2="40" y2="30" class="line-thick" />
+        <!-- Base -->
+        <rect x="-68" y="30" width="136" height="12" class="line-thick fill-white" />
+
+        <!-- Stick Figure "Big Boy" (Top Hat & Suit) -->
+        <g transform="translate(80, -10)">
+            <!-- Head -->
+            <circle cx="0" cy="-35" r="10" class="line-thick fill-white" />
+            <!-- Top Hat -->
+            <rect x="-12" y="-57" width="24" height="14" class="line-thick fill-black" />
+            <line x1="-18" y1="-43" x2="18" y2="-43" class="line-thick" />
+            <!-- Monocle -->
+            <circle cx="4" cy="-37" r="3" class="line" />
+            <path d="M 7 -37 Q 12 -30 10 -20" class="line" />
+            <!-- Body -->
+            <line x1="0" y1="-25" x2="0" y2="10" class="line-thick" />
+            <!-- Arms -->
+            <polyline points="-15,-10 0,-20 15,-10" class="line-thick" />
+            <!-- Legs -->
+            <polyline points="-12,30 0,10 12,30" class="line-thick" />
+        </g>
+
+        <!-- Big Pipe Extracting Money -->
+        <path d="M 0 42 L 0 120 Q 0 140 80 145" class="line-thick" />
+        <path d="M 15 42 L 15 110 Q 15 128 80 132" class="line-thick" />
+        <!-- Pump Mechanism / Arrow -->
+        <path d="M 40 100 L 40 70" stroke="#000000" stroke-width="4" marker-end="url(#arrow)" />
+        <rect x="55" y="75" width="65" height="18" fill="#FFFFFF" stroke="#000000"
+            stroke-width="1.5" />
+        <text x="87" y="88" class="text-sub" font-weight="bold">INFLOW</text>
+
+        <!-- Label -->
+        <text x="0" y="-95" class="text-title">THE BIG BOYS</text>
+        <text x="0" y="-112" class="text-sub">Smart Money / Institutions</text>
+    </g>
+
+    <!-- ==================== THE RETAIL TRADERS ==================== -->
+    <!-- Located Right, dumping small amounts / struggling -->
+    <g transform="translate(640, 140)">
+        <!-- Retail Group Stick Figures -->
+
+        <!-- Retailer 1 (Left) -->
+        <g transform="translate(-50, 0)">
+            <circle cx="0" cy="-30" r="8" class="line-thick fill-white" />
+            <line x1="0" y1="-22" x2="0" y2="10" class="line-thick" />
+            <polyline points="-10,-10 0,-18 10,-5" class="line-thick" />
+            <polyline points="-8,30 0,10 8,30" class="line-thick" />
+        </g>
+
+        <!-- Retailer 2 (Center - Distressed) -->
+        <g transform="translate(0, -10)">
+            <circle cx="0" cy="-30" r="10" class="line-thick fill-white" />
+            <!-- Sad Face Lines -->
+            <path d="M -4 -33 L -2 -31 M 2 -33 L 4 -31" class="line" />
+            <path d="M -4 -23 Q 0 -28 4 -23" class="line" />
+            <line x1="0" y1="-20" x2="0" y2="15" class="line-thick" />
+            <!-- Hands on Head -->
+            <polyline points="-15,-30 -8,-25 0,-20" class="line-thick" />
+            <polyline points="15,-30 8,-25 0,-20" class="line-thick" />
+            <polyline points="-10,35 0,15 10,35" class="line-thick" />
+        </g>
+
+        <!-- Retailer 3 (Right) -->
+        <g transform="translate(45, 5)">
+            <circle cx="0" cy="-30" r="8" class="line-thick fill-white" />
+            <line x1="0" y1="-22" x2="0" y2="10" class="line-thick" />
+            <polyline points="-10,-5 0,-15 10,-15" class="line-thick" />
+            <polyline points="-8,30 0,10 8,30" class="line-thick" />
+        </g>
+
+        <!-- Small Dropping Hose / Bucket Leaking into Pool -->
+        <!-- Small Pipe / Droplet Flow -->
+        <path d="M -20 20 C -20 80 -100 80 -140 120" class="line-dashed" />
+        <polygon points="-135,110 -148,126 -130,124" fill="#000000" />
+
+        <!-- Droplets -->
+        <circle cx="-50" cy="55" r="3" class="fill-black" />
+        <circle cx="-80" cy="75" r="2.5" class="fill-black" />
+        <circle cx="-110" cy="98" r="2" class="fill-black" />
+
+        <!-- Label -->
+        <text x="0" y="-60" class="text-title">RETAIL</text>
+        <text x="0" y="-77" class="text-sub">Exit Liquidity / Main Street</text>
+    </g>
+
+    <!-- ==================== FLOW DESCRIPTORS / ANNOTATIONS ==================== -->
+
+    <!-- Left Side Flow Annotation -->
+    <g transform="translate(180, 390)">
+        <line x1="0" y1="0" x2="0" y2="40" class="line" />
+        <line x1="0" y1="40" x2="40" y2="40" class="line" />
+        <text x="50" y="44" font-family="monospace" font-size="11" font-weight="bold" fill="#000000"
+            text-anchor="start">SYSTEMATIC EXTRACTION</text>
+    </g>
+
+    <!-- Right Side Flow Annotation -->
+    <g transform="translate(600, 390)">
+        <line x1="0" y1="0" x2="0" y2="40" class="line" />
+        <line x1="0" y1="40" x2="-40" y2="40" class="line" />
+        <text x="-50" y="44" font-family="monospace" font-size="11" font-weight="bold"
+            fill="#000000" text-anchor="end">CAPITAL INJECTION</text>
+    </g>
+
+    <!-- Bottom Balance Scale Legend / Footnote -->
+    <g transform="translate(400, 520)">
+        <line x1="-250" y1="0" x2="250" y2="0" class="line-dashed" />
+        <text x="0" y="25" class="text-sub" font-size="11">Asymmetry of Information &amp; Scale in
+            Market Mechanics</text>
+    </g>
+</svg>
