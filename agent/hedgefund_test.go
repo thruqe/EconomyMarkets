@@ -152,7 +152,7 @@ func TestHedgeFundConvergesPriceTowardFairValue(t *testing.T) {
 	// demand, so each side needs comfortably more resting quantity
 	// than that for the book to still have a valid price after each
 	// tick's fill.
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		bidPrice := 99.90 - float64(i)*0.10
 		askPrice := 100.10 + float64(i)*0.10
 		book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Buy, Price: bidPrice, Quantity: 20000})
@@ -164,7 +164,7 @@ func TestHedgeFundConvergesPriceTowardFairValue(t *testing.T) {
 		t.Fatalf("expected a valid starting mid price from seeded book")
 	}
 
-	for tick := 0; tick < 5; tick++ {
+	for tick := range 5 {
 		state := market.NewMarketState("SYN", tick, book, 5, nil, 0)
 		orders := fund.NextOrders(state)
 		for _, o := range orders {

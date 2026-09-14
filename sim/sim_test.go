@@ -58,7 +58,7 @@ func buildSmallSlice(t *testing.T) *Simulation {
 	for _, symbol := range s.Symbols() {
 		book := s.Book(symbol)
 		mid := s.Company(symbol).TrueValue
-		for i := 0; i < 20; i++ {
+		for i := range 20 {
 			bid := mid * (1 - 0.001*float64(i+1))
 			ask := mid * (1 + 0.001*float64(i+1))
 			book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Buy, Price: bid, Quantity: 500})
@@ -77,7 +77,7 @@ func TestSmallSliceRunsWithoutPanicking(t *testing.T) {
 	s := buildSmallSlice(t)
 
 	const ticks = 200
-	for i := 0; i < ticks; i++ {
+	for range ticks {
 		s.Step()
 	}
 
@@ -111,7 +111,7 @@ func TestEventLogCapturesFundamentalEvents(t *testing.T) {
 	// ticks that at least one fundamental event across 5 companies is
 	// highly likely.
 	const ticks = 3000
-	for i := 0; i < ticks; i++ {
+	for range ticks {
 		s.Step()
 	}
 
@@ -196,7 +196,7 @@ func TestBankReceivesExternalPrices(t *testing.T) {
 		s.AddCompany(co)
 		book := s.Book(co.Symbol)
 		mid := co.TrueValue
-		for i := 0; i < 30; i++ {
+		for i := range 30 {
 			book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Buy, Price: mid * (1 - 0.002*float64(i+1)), Quantity: 5000})
 			book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Sell, Price: mid * (1 + 0.002*float64(i+1)), Quantity: 5000})
 		}
@@ -213,7 +213,7 @@ func TestBankReceivesExternalPrices(t *testing.T) {
 	// this step is necessary for the test's premise to hold, not
 	// optional setup.
 	victimCo.ReportedValue = victimCo.TrueValue * 1.5
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		s.Step()
 	}
 	if _, hasPosition := bankAcct.Positions[victimCo.Symbol]; !hasPosition {
@@ -229,7 +229,7 @@ func TestBankReceivesExternalPrices(t *testing.T) {
 	crash := &market.Order{AgentID: "crash_seller", Side: market.Sell, Quantity: 15000, IsMarket: true}
 	s.Book(victimCo.Symbol).Submit(crash)
 
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		s.Step()
 	}
 

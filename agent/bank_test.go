@@ -112,7 +112,7 @@ func TestBankDeRisksAfterDrawdown(t *testing.T) {
 	// suppresses) the order Bank would otherwise place on BBB's large,
 	// perfectly good mispricing.
 	book := market.NewOrderBook()
-	for i := 0; i < 40; i++ {
+	for i := range 40 {
 		bidPrice := 99.90 - float64(i)*0.10
 		askPrice := 100.10 + float64(i)*0.10
 		book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Buy, Price: bidPrice, Quantity: 20000})

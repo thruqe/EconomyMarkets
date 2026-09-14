@@ -189,7 +189,7 @@ func (s *Simulation) currentMidPrices() map[string]float64 {
 func (s *Simulation) runLiquidationCascade() {
 	engine := market.LiquidationEngine{}
 
-	for pass := 0; pass < maxLiquidationPasses; pass++ {
+	for range maxLiquidationPasses {
 		accounts := s.allAccounts()
 		prices := s.currentMidPrices()
 

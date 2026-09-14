@@ -116,7 +116,7 @@ func GenerateWatchlistPool(
 		scored[i] = weightedItem[*company.Company]{item: c, weight: attentionScore(c)}
 	}
 
-	for i := 0; i < n; i++ {
+	for i := range n {
 		tier := pickTier(seeder)
 		style := pickStyle(seeder)
 		archetype := pickArchetype(seeder)

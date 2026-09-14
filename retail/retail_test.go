@@ -169,7 +169,7 @@ func TestLiquiditySweepCascade(t *testing.T) {
 
 	const n = 200
 	crowd := make([]*SimulatedRetailTrader, 0, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		acct := market.NewAccount("bot"+itoa(i), 10000, 2, 0.2)
 		bot := NewSimulatedRetailTrader("bot"+itoa(i), acct, []*company.Company{comp}, Beginner, TechnicalOnly, MomentumChaser, rand.New(rand.NewSource(int64(i))))
 		// Force every bot long from the same entry, with a stop placed
@@ -224,7 +224,7 @@ func TestFundamentalOnlyBotMisledByFraudulentCompany(t *testing.T) {
 	bot := NewSimulatedRetailTrader("bot1", acct, []*company.Company{comp}, Pro, FundamentalOnly, MomentumChaser, rand.New(rand.NewSource(1)))
 
 	book := market.NewOrderBook()
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Buy, Price: 99 - float64(i), Quantity: 5000})
 		book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Sell, Price: 101 + float64(i), Quantity: 5000})
 	}
@@ -235,7 +235,7 @@ func TestFundamentalOnlyBotMisledByFraudulentCompany(t *testing.T) {
 	// resulting decision is attributable to the fundamental gap, not
 	// technical momentum.
 	var lastOrders []*market.Order
-	for i := 0; i < 60; i++ {
+	for i := range 60 {
 		state := market.NewMarketState("SYN", i, book, 5, nil, 0)
 		state.HasMid = true
 		state.Mid = 100
