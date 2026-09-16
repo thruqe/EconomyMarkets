@@ -15,29 +15,21 @@
 // about the same instrument.
 package technicals
 
-// Bar is one OHLC (open/high/low/close) price bar aggregated from a
-// fixed number of underlying ticks, mirroring a real candlestick.
+// Bar is one OHLCV price bar aggregated from underlying ticks and trades.
 type Bar struct {
-	Open  float64
-	High  float64
-	Low   float64
-	Close float64
+	Open         float64
+	High         float64
+	Low          float64
+	Close        float64
+	Volume       float64
+	RetailVolume float64
 
-	// TickCount is how many raw ticks were aggregated into this bar —
-	// mainly useful for diagnostics/tests; a fully-formed bar should
-	// always have TickCount equal to the Aggregator's configured
-	// window size.
+	// TickCount is how many raw ticks were aggregated into this bar.
 	TickCount int
 }
 
-// Aggregator rolls a stream of raw tick-level prices into fixed-size
-// OHLC bars, maintaining a rolling history of completed bars up to
-// maxHistory. This is the multi-timeframe mechanism: constructing two
-// Aggregators with different windowSize values over the same
-// underlying tick stream produces genuinely different bar series
-// (e.g. one bar every 5 ticks vs. one every 50), exactly as a 5-minute
-// chart and a 1-hour chart are built from the same underlying trades
-// in a real market.
+// Aggregator rolls a stream of raw tick-level prices and trade volumes into fixed-size
+// OHLCV bars, maintaining a rolling history of completed bars up to maxHistory.
 type Aggregator struct {
 	windowSize int
 	maxHistory int
@@ -50,8 +42,7 @@ type Aggregator struct {
 }
 
 // NewAggregator constructs an Aggregator that closes a bar every
-// windowSize ticks and retains up to maxHistory completed bars
-// (oldest dropped once exceeded).
+// windowSize ticks and retains up to maxHistory completed bars.
 func NewAggregator(windowSize, maxHistory int) *Aggregator {
 	if windowSize < 1 {
 		windowSize = 1
@@ -62,24 +53,38 @@ func NewAggregator(windowSize, maxHistory int) *Aggregator {
 	return &Aggregator{windowSize: windowSize, maxHistory: maxHistory}
 }
 
-// AddTick feeds one raw tick price into the aggregator. Once
-// windowSize ticks have been accumulated, the in-progress bar closes
-// and is appended to the completed history.
+// AddTick feeds one raw tick price into the aggregator with zero volume.
 func (a *Aggregator) AddTick(price float64) {
-	if !a.hasCurrent {
-		a.current = Bar{Open: price, High: price, Low: price, Close: price, TickCount: 0}
-		a.hasCurrent = true
-	}
+	a.AddTickWithVolume(price, 0, 0)
+}
 
-	if price > a.current.High {
-		a.current.High = price
+// AddTickWithVolume feeds one raw tick price and executed volume into the aggregator.
+func (a *Aggregator) AddTickWithVolume(price float64, volume float64, retailVolume float64) {
+	if !a.hasCurrent {
+		a.current = Bar{
+			Open:         price,
+			High:         price,
+			Low:          price,
+			Close:        price,
+			Volume:       volume,
+			RetailVolume: retailVolume,
+			TickCount:    1,
+		}
+		a.hasCurrent = true
+		a.ticksInCurrent = 1
+	} else {
+		if price > a.current.High {
+			a.current.High = price
+		}
+		if price < a.current.Low {
+			a.current.Low = price
+		}
+		a.current.Close = price
+		a.current.Volume += volume
+		a.current.RetailVolume += retailVolume
+		a.current.TickCount++
+		a.ticksInCurrent++
 	}
-	if price < a.current.Low {
-		a.current.Low = price
-	}
-	a.current.Close = price
-	a.current.TickCount++
-	a.ticksInCurrent++
 
 	if a.ticksInCurrent >= a.windowSize {
 		a.completed = append(a.completed, a.current)
@@ -89,6 +94,14 @@ func (a *Aggregator) AddTick(price float64) {
 		a.hasCurrent = false
 		a.ticksInCurrent = 0
 	}
+}
+
+// Current returns the in-progress forming bar, if any.
+func (a *Aggregator) Current() (Bar, bool) {
+	if !a.hasCurrent {
+		return Bar{}, false
+	}
+	return a.current, true
 }
 
 // Bars returns the completed bar history, oldest first. The

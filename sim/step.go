@@ -1,6 +1,9 @@
 package sim
 
 import (
+	"fmt"
+	"time"
+
 	"economy/company"
 	"economy/market"
 )
@@ -23,36 +26,166 @@ const maxLiquidationPasses = 5
 //
 //  1. Advance every company's fundamentals (Company.Tick()), logging
 //     any FundamentalEvent/RestatementEvent that fired.
-//  2. Build each company's MarketState from its current book and
+//  2. Refresh every agent.Bank's cross-company price map
+//     (SetExternalPrices) with current book mid-prices so Bank evaluates
+//     multi-asset positions at real market prices during the trading round.
+//  3. Build each company's MarketState from its current book and
 //     rolling price history.
-//  3. Poll every participant registered for each company, collecting
+//  4. Poll every participant registered for each company, collecting
 //     every order they return.
-//  4. Submit all of this tick's orders to their respective books,
+//  5. Submit all of this tick's orders to their respective books,
 //     settling every resulting fill into both sides' accounts via
 //     market.ApplySettledFill.
-//  5. Refresh every agent.Bank's cross-company price map
-//     (SetExternalPrices) with this tick's real mid-prices, resolving
-//     the approximation Bank previously had to fall back to.
-//  6. Run the global liquidation scan across every account, looping
-//     (up to maxLiquidationPasses) to let cascades resolve within the
-//     tick — see maxLiquidationPasses' doc.
+//  6. Refresh every agent.Bank's cross-company price map with this
+//     tick's post-trade mid-prices and run the global liquidation scan
+//     across every account, looping (up to maxLiquidationPasses) to let
+//     cascades resolve within the tick — see maxLiquidationPasses' doc.
 //  7. Record each company's new mid-price into rolling history for
 //     next tick's MarketState.
-func (s *Simulation) Step() {
+//
+// Returns a TickReport summarizing all trades, events, quotes, and account states from this tick.
+func (s *Simulation) Step() *TickReport {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	s.tick++
+	eventsStart := len(s.EventLog)
+	var tickTrades []Trade
 
 	s.advanceFundamentals()
-	s.runTradingRound()
 	s.refreshBankExternalPrices()
-	s.runLiquidationCascade()
+	s.runTradingRound(&tickTrades)
+	s.refreshBankExternalPrices()
+	s.runLiquidationCascade(&tickTrades)
 	s.recordPrices()
-}
 
-// advanceFundamentals ticks every company's Company.Tick() and logs
-// any resulting fundamental/restatement events.
-func (s *Simulation) advanceFundamentals() {
+	prices := make(map[string]PriceQuote, len(s.order))
 	for _, symbol := range s.order {
 		cm := s.markets[symbol]
+		mid, hasMid := cm.book.MidPrice()
+		bid, _ := cm.book.BestBid()
+		ask, _ := cm.book.BestAsk()
+		spread, _ := cm.book.Spread()
+		prices[symbol] = PriceQuote{
+			Symbol: symbol,
+			Mid:    mid,
+			Bid:    bid,
+			Ask:    ask,
+			Spread: spread,
+			HasMid: hasMid,
+		}
+	}
+
+	tickEvents := make([]Event, len(s.EventLog)-eventsStart)
+	copy(tickEvents, s.EventLog[eventsStart:])
+
+	currentPrices := s.currentMidPrices()
+	var accts []AccountSnapshot
+	for _, a := range s.allAccounts() {
+		mr, _ := a.MarginRatio(currentPrices)
+		accts = append(accts, AccountSnapshot{
+			AgentID:     a.AgentID,
+			Cash:        a.Cash,
+			Equity:      a.Equity(currentPrices),
+			MarginRatio: mr,
+		})
+	}
+
+	return &TickReport{
+		Tick:      s.tick,
+		Timestamp: time.Now(),
+		Prices:    prices,
+		Trades:    tickTrades,
+		Events:    tickEvents,
+		Accounts:  accts,
+		Citizen:   s.CitizenReport,
+		National:  s.NationalReport,
+	}
+}
+
+// ClearEventLog resets the in-memory EventLog slice to release memory in long-running simulations.
+func (s *Simulation) ClearEventLog() {
+	s.EventLog = s.EventLog[:0]
+}
+
+// advanceFundamentals ticks macroeconomic engines and every company's Company.Tick()
+// while logging resulting events.
+func (s *Simulation) advanceFundamentals() {
+	// 1. Advance Macroeconomic Ecosystem (Citizen & Country / Federal Reserve)
+	if s.Citizen != nil && s.National != nil {
+		var totalHeadcount float64
+		var totalCapEx float64
+		var totalCorporateTaxes float64
+		var sumReturns float64
+
+		for _, symbol := range s.order {
+			co := s.markets[symbol].co
+			totalHeadcount += co.Headcount
+			totalCapEx += co.CapEx
+			totalCorporateTaxes += co.CorporateTaxPaid
+			if co.SharesOutstanding > 0 {
+				sumReturns += (co.ReportedValue - co.TrueValue) / co.TrueValue
+			}
+		}
+
+		// Scale sample universe to national macro employment scale
+		scaledHeadcount := totalHeadcount
+		if totalHeadcount > 0 {
+			scaledHeadcount = totalHeadcount * (161_700_000.0 / 25_000_000.0)
+		}
+
+		marketReturn := 0.0
+		if len(s.order) > 0 {
+			marketReturn = sumReturns / float64(len(s.order))
+		}
+
+		s.CitizenReport = s.Citizen.Tick(
+			s.National.Labor.EmployedWorkers,
+			s.National.Labor.AverageHourlyWage,
+			s.National.CentralBank.CPIInflationRate,
+			s.National.Labor.AnnualWageGrowth,
+			marketReturn,
+			1.0/252.0,
+		)
+
+		s.NationalReport = s.National.Tick(
+			s.CitizenReport.ConsumerSpending,
+			totalCapEx,
+			scaledHeadcount,
+			totalCorporateTaxes,
+			s.CitizenReport.TaxesPaidThisTick,
+			1.0/252.0,
+		)
+
+		// If FOMC rate announcement occurred, push event to EventLog
+		if s.NationalReport.FOMCAnnouncement != "" {
+			s.EventLog = append(s.EventLog, Event{
+				Tick:          s.tick,
+				Kind:          EventMacro,
+				Symbol:        "FED",
+				MacroHeadline: s.NationalReport.FOMCAnnouncement,
+			})
+		}
+	}
+
+	for _, symbol := range s.order {
+		cm := s.markets[symbol]
+
+		if s.National != nil {
+			sectorStr := cm.co.Sector.String()
+			compositeDemand := s.National.CompositeSectorDemand(
+				sectorStr,
+				s.CitizenReport.SectorDemand[sectorStr],
+			)
+			cm.co.UpdateMacro(
+				s.National.Labor.AverageHourlyWage,
+				s.National.Fiscal.CorporateTaxRate,
+				s.National.CentralBank.TenYearYield,
+				compositeDemand,
+				1.0/252.0,
+			)
+		}
+
 		fundamental, restatement := cm.co.Tick()
 
 		if fundamental.Kind != company.NoJump {
@@ -74,6 +207,79 @@ func (s *Simulation) advanceFundamentals() {
 				Severity:           restatement.Severity,
 			})
 		}
+
+		// Corporate distress and workout mechanisms:
+		// When a company faces severe distress, realistic financial interventions occur:
+		if cm.co.ReportedValue < 1.00 {
+			// 1. Reverse Stock Split: 1-for-10 ratio to prevent penny-stock delisting
+			oldVal := cm.co.ReportedValue
+			cm.co.TrueValue *= 10
+			cm.co.ReportedValue *= 10
+			cm.co.SharesOutstanding /= 10
+			cm.co.Float /= 10
+			s.EventLog = append(s.EventLog, Event{
+				Tick:            s.tick,
+				Kind:            EventReverseSplit,
+				Symbol:          symbol,
+				DistressDetails: fmt.Sprintf("1-for-10 reverse split executed to maintain listing standards ($%.2f -> $%.2f)", oldVal, cm.co.ReportedValue),
+			})
+		} else if cm.co.TrueValue < 5.00 && s.rng != nil {
+			// Distress resolution chance per tick for distressed companies
+			if s.rng.Float64() < 0.02 {
+				workoutRoll := s.rng.Float64()
+				switch {
+				case workoutRoll < 0.30:
+					// Emergency Bailout / Syndicate Credit Facility (+50% value recovery)
+					mult := 1.40 + s.rng.Float64()*0.35
+					cm.co.TrueValue *= mult
+					cm.co.ReportedValue *= mult
+					facility := 250_000_000 + s.rng.Float64()*500_000_000
+					s.EventLog = append(s.EventLog, Event{
+						Tick:            s.tick,
+						Kind:            EventBailout,
+						Symbol:          symbol,
+						DistressDetails: fmt.Sprintf("Secured $%.0fM emergency credit line (+%.0f%% value recovery)", facility/1e6, (mult-1)*100),
+					})
+
+				case workoutRoll < 0.60:
+					// Strategic Acquisition / Buyout Offer (+60% premium)
+					mult := 1.50 + s.rng.Float64()*0.30
+					cm.co.TrueValue *= mult
+					cm.co.ReportedValue *= mult
+					s.EventLog = append(s.EventLog, Event{
+						Tick:            s.tick,
+						Kind:            EventAcquisition,
+						Symbol:          symbol,
+						DistressDetails: fmt.Sprintf("Private equity syndicate submitted buyout offer @ $%.2f (+%.0f%% premium)", cm.co.ReportedValue, (mult-1)*100),
+					})
+
+				case workoutRoll < 0.85:
+					// Operational Restructuring & Turnaround (+35% margin & valuation boost)
+					mult := 1.30 + s.rng.Float64()*0.25
+					cm.co.TrueValue *= mult
+					cm.co.ReportedValue *= mult
+					cm.co.NetMargin *= 1.25
+					s.EventLog = append(s.EventLog, Event{
+						Tick:            s.tick,
+						Kind:            EventRestructuring,
+						Symbol:          symbol,
+						DistressDetails: fmt.Sprintf("Turnaround plan announced: closed non-core units, improved margins (+%.0f%% valuation)", (mult-1)*100),
+					})
+
+				default:
+					// Chapter 11 Reorganization (+45% clean balance sheet rebound)
+					mult := 1.35 + s.rng.Float64()*0.30
+					cm.co.TrueValue *= mult
+					cm.co.ReportedValue *= mult
+					s.EventLog = append(s.EventLog, Event{
+						Tick:            s.tick,
+						Kind:            EventChapter11,
+						Symbol:          symbol,
+						DistressDetails: fmt.Sprintf("Court approved Chapter 11 plan: debt cleared, emerging with clean balance sheet"),
+					})
+				}
+			}
+		}
 	}
 }
 
@@ -93,7 +299,7 @@ func (s *Simulation) advanceFundamentals() {
 // implementation; a fully simultaneous-clearing version is a possible
 // future refinement, not something quietly claimed as already true
 // here.
-func (s *Simulation) runTradingRound() {
+func (s *Simulation) runTradingRound(trades *[]Trade) {
 	for _, symbol := range s.order {
 		cm := s.markets[symbol]
 		state := cm.state(s.tick, s.depthLevels)
@@ -101,12 +307,26 @@ func (s *Simulation) runTradingRound() {
 		var allOrders []*market.Order
 		for _, p := range cm.participants {
 			orders := p.NextOrders(state)
-			allOrders = append(allOrders, orders...)
+			if len(orders) > 0 {
+				// If participant submitted resting limit orders (e.g. MarketMaker refresh),
+				// cancel their previous unexecuted orders so the book doesn't accumulate infinite stale liquidity.
+				hasLimit := false
+				for _, o := range orders {
+					if !o.IsMarket {
+						hasLimit = true
+						break
+					}
+				}
+				if hasLimit {
+					cm.book.CancelAgentOrders(p.ID())
+				}
+				allOrders = append(allOrders, orders...)
+			}
 		}
 
 		for _, o := range allOrders {
 			fills := cm.book.Submit(o)
-			s.settleFills(symbol, o, fills)
+			s.settleFills(symbol, o, fills, trades)
 		}
 	}
 }
@@ -117,8 +337,25 @@ func (s *Simulation) runTradingRound() {
 // against — settleFills looks up both by AgentID across every
 // registered holder, since a fill's maker could be any participant
 // registered for this symbol, not just the taker.
-func (s *Simulation) settleFills(symbol string, o *market.Order, fills []market.Fill) {
+func (s *Simulation) settleFills(symbol string, o *market.Order, fills []market.Fill, trades *[]Trade) {
+	sideStr := "BUY"
+	if o.Side == market.Sell {
+		sideStr = "SELL"
+	}
+
 	for _, f := range fills {
+		if trades != nil {
+			*trades = append(*trades, Trade{
+				Tick:         s.tick,
+				Symbol:       symbol,
+				TakerAgentID: f.TakerAgentID,
+				MakerAgentID: f.MakerAgentID,
+				Side:         sideStr,
+				Price:        f.Price,
+				Quantity:     f.Quantity,
+			})
+		}
+
 		if taker := s.findAccount(f.TakerAgentID); taker != nil {
 			market.ApplySettledFill(taker, symbol, o.Side, f.Quantity, f.Price)
 		}
@@ -186,7 +423,7 @@ func (s *Simulation) currentMidPrices() map[string]float64 {
 // to maxLiquidationPasses times so a cascade can resolve within this
 // tick (a forced sell can itself trigger the next liquidation) — see
 // maxLiquidationPasses' doc for the reasoning and its cap.
-func (s *Simulation) runLiquidationCascade() {
+func (s *Simulation) runLiquidationCascade(trades *[]Trade) {
 	engine := market.LiquidationEngine{}
 
 	for range maxLiquidationPasses {
@@ -205,7 +442,7 @@ func (s *Simulation) runLiquidationCascade() {
 			}
 			order := fo.Order
 			fills := cm.book.Submit(&order)
-			s.settleFills(fo.Symbol, &order, fills)
+			s.settleFills(fo.Symbol, &order, fills, trades)
 
 			s.EventLog = append(s.EventLog, Event{
 				Tick:              s.tick,

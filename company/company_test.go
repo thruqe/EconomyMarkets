@@ -177,3 +177,132 @@ func TestGBMDriftDirection(t *testing.T) {
 		t.Fatalf("expected positive drift to increase value over 500 ticks, start=%.4f end=%.4f", start, c.TrueValue)
 	}
 }
+
+func TestCompanyFinancialFundamentals(t *testing.T) {
+	used := make(map[string]bool)
+	params := DefaultGenerationParams()
+	rng := newTestRng(100)
+
+	co := GenerateCompany(InformationTechnology, LargeCap, params, rng, used)
+
+	if co.AnnualRevenue <= 0 {
+		t.Fatalf("expected positive annual revenue, got %.2f", co.AnnualRevenue)
+	}
+	if co.NetMargin <= 0 || co.NetMargin > 1.0 {
+		t.Fatalf("expected realistic net margin, got %.4f", co.NetMargin)
+	}
+	if co.SectorMultiple <= 0 {
+		t.Fatalf("expected positive sector multiple, got %.2f", co.SectorMultiple)
+	}
+
+	marketCap := co.MarketCap()
+	if marketCap <= 0 {
+		t.Fatalf("expected positive market cap, got %.2f", marketCap)
+	}
+
+	netIncome := co.NetIncome()
+	if netIncome <= 0 {
+		t.Fatalf("expected positive net income, got %.2f", netIncome)
+	}
+
+	eps := co.EarningsPerShare()
+	if eps <= 0 {
+		t.Fatalf("expected positive EPS, got %.4f", eps)
+	}
+
+	pe := co.PriceToEarnings(co.TrueValue)
+	if pe <= 0 {
+		t.Fatalf("expected positive P/E ratio, got %.2f", pe)
+	}
+
+	ps := co.PriceToSales(co.TrueValue)
+	if ps <= 0 {
+		t.Fatalf("expected positive P/S ratio, got %.2f", ps)
+	}
+}
+
+func TestGenerateIPOCompany(t *testing.T) {
+	used := make(map[string]bool)
+	rng := newTestRng(2026)
+
+	// An enterprise IPO with $15 Billion in annual revenue
+	customRev := 15_000_000_000.0
+	ipo := GenerateIPOCompany(InformationTechnology, MegaCap, customRev, 100, rng, used)
+
+	if !ipo.IsIPO {
+		t.Fatalf("expected IsIPO to be true")
+	}
+	if ipo.IPOTick != 100 {
+		t.Fatalf("expected IPOTick to be 100, got %d", ipo.IPOTick)
+	}
+	if ipo.AnnualRevenue != customRev {
+		t.Fatalf("expected AnnualRevenue %.2f, got %.2f", customRev, ipo.AnnualRevenue)
+	}
+	if ipo.SharesOutstanding < 1_000_000_000 {
+		t.Fatalf("expected MegaCap shares >= 1B, got %.0f", ipo.SharesOutstanding)
+	}
+	if ipo.TrueValue <= 0 {
+		t.Fatalf("expected positive TrueValue, got %.2f", ipo.TrueValue)
+	}
+	if ipo.IPOPrice != ipo.TrueValue {
+		t.Fatalf("expected IPOPrice to match initial TrueValue, got %.2f vs %.2f", ipo.IPOPrice, ipo.TrueValue)
+	}
+}
+
+func TestCompanyMacroFootprint(t *testing.T) {
+	used := make(map[string]bool)
+	rng := newTestRng(777)
+	co := GenerateCompany(InformationTechnology, LargeCap, DefaultGenerationParams(), rng, used)
+
+	if co.Headcount <= 0 {
+		t.Errorf("expected positive Headcount, got %f", co.Headcount)
+	}
+	if co.AverageWage <= 0 {
+		t.Errorf("expected positive AverageWage, got %f", co.AverageWage)
+	}
+	if co.LaborExpense <= 0 {
+		t.Errorf("expected positive LaborExpense, got %f", co.LaborExpense)
+	}
+	if co.DebtOutstanding <= 0 {
+		t.Errorf("expected positive DebtOutstanding, got %f", co.DebtOutstanding)
+	}
+	if co.CapEx <= 0 {
+		t.Errorf("expected positive CapEx, got %f", co.CapEx)
+	}
+
+	initialRev := co.AnnualRevenue
+	// Update with bullish macro demand
+	co.UpdateMacro(35.0, 0.21, 0.045, 1.20, 1.0/252.0)
+	if co.AnnualRevenue <= initialRev {
+		t.Errorf("expected positive revenue drift under 1.20 demand multiplier")
+	}
+}
+
+func TestUninitializedCompanyTickSafe(t *testing.T) {
+	// A completely zeroed unexported-field Company simulating JSON restoration
+	co := &Company{
+		Symbol:            "TEST",
+		Name:              "Test Corp",
+		Sector:            InformationTechnology,
+		CapTier:           MidCap,
+		TrueValue:         150.0,
+		ReportedValue:     150.0,
+		SharesOutstanding: 10_000_000,
+	}
+
+	// Should not panic, should lazy init runtime
+	for i := 0; i < 50; i++ {
+		evt, restate := co.Tick()
+		_ = evt
+		_ = restate
+	}
+
+	if co.rng == nil {
+		t.Fatalf("expected co.rng to be initialized after Tick")
+	}
+	if co.volatility == 0 {
+		t.Fatalf("expected co.volatility to be initialized after Tick")
+	}
+}
+
+

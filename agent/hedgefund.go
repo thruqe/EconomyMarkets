@@ -169,6 +169,13 @@ type HedgeFund struct {
 	// though (matching reality) a large enough hidden gap can still
 	// mislead a discounted estimate, not just an undiscounted one.
 	SkepticismDiscount float64
+
+	// ExecutionRate (0-1] controls what fraction of the target rebalance delta
+	// is executed per tick (TWAP/VWAP style slicing). Defaults to 1.0 (immediate full-delta attempt).
+	ExecutionRate float64
+
+	// MaxOrderShares optionally caps the maximum share quantity for a single order (0 = unlimited).
+	MaxOrderShares float64
 }
 
 // NewHedgeFund constructs a HedgeFund specialized on a single company.
@@ -189,6 +196,8 @@ func NewHedgeFund(id string, acct *market.Account, target *company.Company) *Hed
 		FullConvictionThreshold: 0.25, // 25% — at or beyond this, full conviction
 		RebalanceThreshold:      0.05, // 5% of available buying power
 		SkepticismDiscount:      0.35, // moderate professional skepticism
+		ExecutionRate:           1.0,  // default to full delta execution for test compatibility
+		MaxOrderShares:          0,    // 0 = no cap
 	}
 }
 
@@ -208,6 +217,15 @@ func (h *HedgeFund) NextOrders(state market.MarketState) []*market.Order {
 		h.SkepticismDiscount,
 	)
 	if order == nil {
+		return nil
+	}
+	if h.ExecutionRate > 0 && h.ExecutionRate < 1.0 {
+		order.Quantity *= h.ExecutionRate
+	}
+	if h.MaxOrderShares > 0 && order.Quantity > h.MaxOrderShares {
+		order.Quantity = h.MaxOrderShares
+	}
+	if order.Quantity <= 0 {
 		return nil
 	}
 	return []*market.Order{order}

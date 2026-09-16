@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"math"
+
+	"economy/company"
 	"economy/market"
 )
 
@@ -40,6 +43,13 @@ type MarketMaker struct {
 	// from MarketState.Mid on purpose — see type doc.
 	fairValue *EMA
 
+	// company is an optional reference to the covered enterprise fundamentals.
+	// When present, fairValue is anchored to genuine business performance (ReportedValue).
+	company *company.Company
+
+	// LadderLevels specifies how many price depth levels to quote on each side (defaults to 1).
+	LadderLevels int
+
 	// RiskAversion (γ) controls how strongly inventory and volatility
 	// widen the spread and shift the reservation price. Higher =
 	// more risk-averse: wider spreads, more aggressive inventory
@@ -78,6 +88,7 @@ func NewMarketMaker(id string, startingCash, maxLeverage, maintenanceMarginRatio
 		id:                   id,
 		account:              market.NewAccount(id, startingCash, maxLeverage, maintenanceMarginRatio),
 		fairValue:            NewEMA(0.1),
+		LadderLevels:         1,
 		RiskAversion:         0.1,
 		BaseHalfSpread:       0.02,
 		SpreadVolCoefficient: 50.0,
@@ -89,6 +100,11 @@ func NewMarketMaker(id string, startingCash, maxLeverage, maintenanceMarginRatio
 func (m *MarketMaker) ID() string               { return m.id }
 func (m *MarketMaker) Account() *market.Account { return m.account }
 
+// SetCompany associates a company with this market maker so quote ladders track fundamental enterprise performance.
+func (m *MarketMaker) SetCompany(c *company.Company) {
+	m.company = c
+}
+
 // reservationPrice computes the inventory- and volatility-adjusted
 // center of the MM's quotes: r = fairValue - inventory*γ*σ².
 // A positive inventory (net long) pulls the reservation price down —
@@ -96,7 +112,8 @@ func (m *MarketMaker) Account() *market.Account { return m.account }
 // its whole quote ladder shifts down. A negative inventory (net
 // short) pushes it up, for the symmetric reason.
 func (m *MarketMaker) reservationPrice(inventory float64, variance float64) float64 {
-	return m.fairValue.Value() - inventory*m.RiskAversion*variance
+	effectiveVar := math.Max(variance, 0.0002)
+	return m.fairValue.Value() - inventory*m.RiskAversion*effectiveVar
 }
 
 // halfSpread computes quote half-width: widens with both configured
@@ -120,44 +137,144 @@ func (m *MarketMaker) NextOrders(state market.MarketState) []*market.Order {
 	if state.HasMid {
 		m.fairValue.Update(state.Mid)
 	}
-	if !m.fairValue.Initialized() {
-		return nil // no fair value estimate yet, nothing to quote around
+
+	var center float64
+	if m.company != nil {
+		fund := m.company.ReportedValue
+		if fund <= 0 {
+			fund = m.company.TrueValue
+		}
+		if fund > 0 {
+			if m.fairValue.Initialized() {
+				center = 0.70*fund + 0.30*m.fairValue.Value()
+			} else {
+				center = fund
+			}
+		}
+	}
+	if center <= 0 {
+		if !m.fairValue.Initialized() {
+			return nil // no fair value estimate yet, nothing to quote around
+		}
+		center = m.fairValue.Value()
 	}
 
 	variance := Variance(state.RecentVolatility)
 	inventory := NetInventory(m.account, state.Symbol)
 
-	r := m.reservationPrice(inventory, variance)
-	halfSpread := m.halfSpread(variance)
+	effectiveVar := math.Max(variance, 0.0002)
+	skew := inventory * m.RiskAversion * effectiveVar
+	maxSkew := center * 0.04
+	if skew > maxSkew {
+		skew = maxSkew
+	} else if skew < -maxSkew {
+		skew = -maxSkew
+	}
+	r := center - skew
 
-	bidPrice := r - halfSpread
-	askPrice := r + halfSpread
+	maxHalfSpread := math.Max(0.10, center*0.02)
+	halfSpread := math.Min(m.halfSpread(variance), maxHalfSpread)
 
-	canBuy := inventory+m.QuoteSize <= m.MaxInventory
-	canSell := inventory-m.QuoteSize >= -m.MaxInventory
+	// Dynamic inventory management:
+	// Rather than completely pulling one side (which collapses market mid-price and halts trading),
+	// dynamically scale quote sizes and skew spreads so the MM continuously maintains a 2-sided book.
+	buySize := m.QuoteSize
+	sellSize := m.QuoteSize
+
+	if inventory > m.MaxInventory*0.75 {
+		// Long inventory high: shrink buy quote to minimum, expand sell quote to shed shares
+		excess := (inventory - m.MaxInventory*0.75) / (m.MaxInventory * 0.25)
+		buySize = math.Max(1.0, math.Floor(m.QuoteSize*(1.0-0.9*math.Min(1.0, excess))))
+		sellSize = math.Floor(m.QuoteSize * (1.0 + 0.5*math.Min(2.0, excess)))
+	} else if inventory < -m.MaxInventory*0.75 {
+		// Short inventory high: shrink sell quote, expand buy quote to cover shares
+		excess := (-inventory - m.MaxInventory*0.75) / (m.MaxInventory * 0.25)
+		sellSize = math.Max(1.0, math.Floor(m.QuoteSize*(1.0-0.9*math.Min(1.0, excess))))
+		buySize = math.Floor(m.QuoteSize * (1.0 + 0.5*math.Min(2.0, excess)))
+	}
+
+	canBuy := inventory < m.MaxInventory
+	canSell := inventory > -m.MaxInventory
+
+	if m.LadderLevels <= 1 {
+		bidPrice := math.Round((r-halfSpread)*100) / 100
+		askPrice := math.Round((r+halfSpread)*100) / 100
+		if bidPrice < 0.01 {
+			bidPrice = 0.01
+		}
+		if askPrice <= bidPrice {
+			askPrice = bidPrice + 0.01
+		}
+
+		var orders []*market.Order
+		if canBuy {
+			orders = append(orders, &market.Order{
+				AgentID:  m.id,
+				Side:     market.Buy,
+				Price:    bidPrice,
+				Quantity: buySize,
+				IsMarket: false,
+			})
+		}
+		if canSell {
+			orders = append(orders, &market.Order{
+				AgentID:  m.id,
+				Side:     market.Sell,
+				Price:    askPrice,
+				Quantity: sellSize,
+				IsMarket: false,
+			})
+		}
+		return orders
+	}
+
+	// Multi-level depth ladder: provides deep, mobile liquidity that travels with the market
+	ladderSteps := []struct {
+		offsetMult float64
+		sizeMult   float64
+	}{
+		{1.0, 1.0},
+		{2.5, 1.5},
+		{5.0, 2.5},
+		{9.0, 4.0},
+		{15.0, 6.0},
+	}
+	if m.LadderLevels < len(ladderSteps) {
+		ladderSteps = ladderSteps[:m.LadderLevels]
+	}
 
 	var orders []*market.Order
+	for _, step := range ladderSteps {
+		stepOffset := halfSpread * step.offsetMult
+		bp := math.Round((r-stepOffset)*100) / 100
+		ap := math.Round((r+stepOffset)*100) / 100
+		if bp < 0.01 {
+			bp = 0.01
+		}
+		if ap <= bp {
+			ap = bp + 0.01
+		}
 
-	if canBuy {
-		orders = append(orders, &market.Order{
-			AgentID:  m.id,
-			Side:     market.Buy,
-			Price:    bidPrice,
-			Quantity: m.QuoteSize,
-			IsMarket: false,
-		})
+		if canBuy {
+			orders = append(orders, &market.Order{
+				AgentID:  m.id,
+				Side:     market.Buy,
+				Price:    bp,
+				Quantity: math.Round(buySize * step.sizeMult),
+				IsMarket: false,
+			})
+		}
+		if canSell {
+			orders = append(orders, &market.Order{
+				AgentID:  m.id,
+				Side:     market.Sell,
+				Price:    ap,
+				Quantity: math.Round(sellSize * step.sizeMult),
+				IsMarket: false,
+			})
+		}
 	}
-	if canSell {
-		orders = append(orders, &market.Order{
-			AgentID:  m.id,
-			Side:     market.Sell,
-			Price:    askPrice,
-			Quantity: m.QuoteSize,
-			IsMarket: false,
-		})
-	}
-
-	return orders // nil if both sides are blocked by inventory limits
+	return orders
 }
 
 // EffectiveSpread is exposed for logging/analysis: lets the sim loop

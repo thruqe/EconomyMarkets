@@ -1,6 +1,7 @@
 package retail
 
 import (
+	"math"
 	"math/rand"
 
 	"economy/company"
@@ -23,18 +24,26 @@ type stopLoss struct {
 	isLong    bool
 }
 
+// takeProfit represents a resting limit/profit target order.
+// Locking in gains releases capital back into cash, allowing retail
+// participants to recycle buying power into subsequent opportunities.
+type takeProfit struct {
+	active    bool
+	triggerAt float64 // price level, above entry (for long) or below entry (for short)
+	isLong    bool
+}
+
 // watchState holds everything specific to one company on a bot's
 // watchlist: its own technicals aggregator (momentum on company A
 // tells you nothing about company B, so each watched company needs
 // independent bar history), its own cooldown counter, and its own
-// stop-loss. A bot with several companies on its watchlist is not
-// "one bot split several ways" — it genuinely tracks each company
-// independently, exactly as a real retail trader watching a handful
-// of names does.
+// stop-loss and take-profit target.
 type watchState struct {
 	agg               *technicals.Aggregator
 	cooldownRemaining int
 	stop              stopLoss
+	target            takeProfit
+	ticksHeld         int
 }
 
 // SimulatedRetailTrader is a behavioral, non-conviction-driven market
@@ -220,6 +229,120 @@ func (b *SimulatedRetailTrader) placeStop(ws *watchState, entryPrice float64, is
 	}
 }
 
+// checkTakeProfit returns a market order closing a profitable position
+// when price achieves this bot's profit target, locking in gains and
+// releasing buying power back into cash.
+func (b *SimulatedRetailTrader) checkTakeProfit(symbol string, currentPrice float64) *market.Order {
+	ws := b.state[symbol]
+	if ws == nil || !ws.target.active {
+		return nil
+	}
+
+	triggered := false
+	if ws.target.isLong && currentPrice >= ws.target.triggerAt {
+		triggered = true
+	}
+	if !ws.target.isLong && currentPrice <= ws.target.triggerAt {
+		triggered = true
+	}
+	if !triggered {
+		return nil
+	}
+
+	qty := absF(b.netInventory(symbol))
+	if qty <= 0 {
+		ws.target.active = false
+		return nil
+	}
+
+	side := market.Sell
+	if !ws.target.isLong {
+		side = market.Buy
+	}
+
+	ws.target.active = false
+	if ws.stop.active {
+		ws.stop.active = false
+	}
+	tp := tierProfiles[b.tier]
+	ws.cooldownRemaining = tp.CooldownTicksMin + b.rng.Intn(tp.CooldownTicksMax-tp.CooldownTicksMin+1)
+
+	return &market.Order{AgentID: b.id, Side: side, Quantity: qty, IsMarket: true}
+}
+
+// checkTimeDecayRotation rebalances or exits stagnant positions held for > 40 ticks
+// so capital is not trapped in flat conditions, ensuring ongoing market turnover.
+func (b *SimulatedRetailTrader) checkTimeDecayRotation(symbol string) *market.Order {
+	ws := b.state[symbol]
+	if ws == nil {
+		return nil
+	}
+
+	inv := b.netInventory(symbol)
+	if inv == 0 {
+		ws.ticksHeld = 0
+		return nil
+	}
+
+	ws.ticksHeld++
+	if ws.ticksHeld < 40 {
+		return nil
+	}
+
+	// 15% probability per tick to rotate stagnant capital once held > 40 ticks
+	if b.rng.Float64() >= 0.15 {
+		return nil
+	}
+
+	ws.ticksHeld = 0
+	ws.stop.active = false
+	ws.target.active = false
+
+	qty := absF(inv)
+	side := market.Sell
+	if inv < 0 {
+		side = market.Buy
+	}
+
+	tp := tierProfiles[b.tier]
+	ws.cooldownRemaining = tp.CooldownTicksMin + b.rng.Intn(tp.CooldownTicksMax-tp.CooldownTicksMin+1)
+	return &market.Order{AgentID: b.id, Side: side, Quantity: qty, IsMarket: true}
+}
+
+// placeTakeProfit sets a realistic profit target based on Archetype.
+// When hit, profit is locked in, releasing cash so the bot can trade again.
+func (b *SimulatedRetailTrader) placeTakeProfit(ws *watchState, entryPrice float64, isLong bool) {
+	var pct float64
+	switch b.archetype {
+	case Disciplined:
+		pct = 0.04 + b.rng.Float64()*0.04 // 4-8%
+	case MomentumChaser:
+		pct = 0.08 + b.rng.Float64()*0.10 // 8-18%
+	case Contrarian:
+		pct = 0.05 + b.rng.Float64()*0.06 // 5-11%
+	case Degenerate:
+		pct = 0.10 + b.rng.Float64()*0.15 // 10-25%
+	default:
+		pct = 0.06 + b.rng.Float64()*0.08 // 6-14%
+	}
+
+	var triggerPrice float64
+	if isLong {
+		triggerPrice = entryPrice * (1.0 + pct)
+	} else {
+		triggerPrice = entryPrice * (1.0 - pct)
+		if triggerPrice <= 0.05 {
+			triggerPrice = 0.05
+		}
+	}
+
+	ws.target = takeProfit{
+		active:    true,
+		triggerAt: triggerPrice,
+		isLong:    isLong,
+	}
+}
+
 func roundNumberIncrement(price float64) float64 {
 	switch {
 	case price < 10:
@@ -249,7 +372,7 @@ func roundUp(price, increment float64) float64 {
 // from that company's own technicals window and (if this bot's
 // style/tier allow) its fundamentals — see InformationStyle doc for
 // what each style actually reads.
-func (b *SimulatedRetailTrader) computeSignal(symbol string, target *company.Company, ws *watchState, state market.MarketState) (Signal, bool) {
+func (b *SimulatedRetailTrader) computeSignal(target *company.Company, ws *watchState, state market.MarketState) (Signal, bool) {
 	bars := ws.agg.Bars()
 	tp := tierProfiles[b.tier]
 
@@ -332,10 +455,18 @@ func (b *SimulatedRetailTrader) NextOrders(state market.MarketState) []*market.O
 	}
 	ws.agg.AddTick(state.Mid)
 
-	// Stop-loss check is unconditional and comes before cooldown or
-	// any discretionary logic — a real stop doesn't wait for the
-	// trader to feel like checking it.
+	// Stop-loss check is unconditional and comes before cooldown or discretionary logic
 	if order := b.checkStopLoss(state.Symbol, state.Mid); order != nil {
+		return []*market.Order{order}
+	}
+
+	// Take-profit target check: locks in gains when target is reached, recycling cash
+	if order := b.checkTakeProfit(state.Symbol, state.Mid); order != nil {
+		return []*market.Order{order}
+	}
+
+	// Stagnant position rotation: frees up capital so market never freezes
+	if order := b.checkTimeDecayRotation(state.Symbol); order != nil {
 		return []*market.Order{order}
 	}
 
@@ -344,7 +475,7 @@ func (b *SimulatedRetailTrader) NextOrders(state market.MarketState) []*market.O
 		return nil
 	}
 
-	signal, ok := b.computeSignal(state.Symbol, target, ws, state)
+	signal, ok := b.computeSignal(target, ws, state)
 	if !ok {
 		return nil // not enough bar history yet, or (Confused) nothing driving this tick
 	}
@@ -365,15 +496,43 @@ func (b *SimulatedRetailTrader) NextOrders(state market.MarketState) []*market.O
 	}
 
 	sizeFraction := tp.PositionSizeFractionMin + b.rng.Float64()*(tp.PositionSizeFractionMax-tp.PositionSizeFractionMin)
-	buyingPower := b.account.AvailableBuyingPower(map[string]float64{state.Symbol: state.Mid})
-	notional := buyingPower * sizeFraction
-	if notional <= 0 {
-		return nil
+	inv := b.netInventory(state.Symbol)
+
+	var quantity float64
+	if side == market.Sell && inv > 0 {
+		// Closing or trimming an existing long position
+		quantity = math.Max(1.0, math.Floor(inv*sizeFraction))
+		if quantity > inv {
+			quantity = inv
+		}
+		if quantity <= 0 {
+			return nil
+		}
+	} else if side == market.Buy && inv < 0 {
+		// Covering or trimming an existing short position
+		shortQty := -inv
+		quantity = math.Max(1.0, math.Floor(shortQty*sizeFraction))
+		if quantity > shortQty {
+			quantity = shortQty
+		}
+		if quantity <= 0 {
+			return nil
+		}
+	} else {
+		// Opening a new position or adding to exposure using available buying power
+		buyingPower := b.account.AvailableBuyingPower(map[string]float64{state.Symbol: state.Mid})
+		notional := buyingPower * sizeFraction
+		if notional <= 0 {
+			return nil
+		}
+		quantity = math.Floor(notional / state.Mid)
+		if quantity <= 0 {
+			return nil
+		}
+		b.placeStop(ws, state.Mid, side == market.Buy, ws.agg.Bars())
+		b.placeTakeProfit(ws, state.Mid, side == market.Buy)
 	}
-	quantity := notional / state.Mid
 
-	b.placeStop(ws, state.Mid, side == market.Buy, ws.agg.Bars())
 	ws.cooldownRemaining = tp.CooldownTicksMin + b.rng.Intn(tp.CooldownTicksMax-tp.CooldownTicksMin+1)
-
 	return []*market.Order{{AgentID: b.id, Side: side, Quantity: quantity, IsMarket: true}}
 }

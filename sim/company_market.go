@@ -78,10 +78,16 @@ func (cm *companyMarket) recentVolatility() float64 {
 	returns := make([]float64, 0, len(cm.priceHistory)-1)
 	for i := 1; i < len(cm.priceHistory); i++ {
 		prev := cm.priceHistory[i-1]
-		if prev == 0 {
+		if prev <= 0.001 {
 			continue
 		}
-		returns = append(returns, (cm.priceHistory[i]-prev)/prev)
+		ret := (cm.priceHistory[i] - prev) / prev
+		if ret > 0.10 {
+			ret = 0.10
+		} else if ret < -0.10 {
+			ret = -0.10
+		}
+		returns = append(returns, ret)
 	}
 	if len(returns) < 2 {
 		return 0
@@ -99,7 +105,11 @@ func (cm *companyMarket) recentVolatility() float64 {
 	}
 	variance /= float64(len(returns))
 
-	return math.Sqrt(variance)
+	vol := math.Sqrt(variance)
+	if vol > 0.05 {
+		vol = 0.05
+	}
+	return vol
 }
 
 // state builds this tick's MarketState from current book state and

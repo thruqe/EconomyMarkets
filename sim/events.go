@@ -11,6 +11,13 @@ const (
 	EventFundamental EventKind = iota // a company.FundamentalEvent with Kind != NoJump
 	EventRestatement                  // a company.RestatementEvent
 	EventLiquidation                  // a forced liquidation order was generated and submitted
+	EventIPO                          // an enterprise public listing event
+	EventBailout                      // emergency liquidity bailout / syndicate credit line
+	EventAcquisition                  // strategic buyout offer at premium
+	EventRestructuring                // turnaround cost cutting & operational reorganization
+	EventReverseSplit                 // 1-for-10 reverse stock split to maintain listing standards
+	EventChapter11                    // court-supervised debt restructuring & clean balance sheet
+	EventMacro                        // macroeconomic event (FOMC policy, CPI, labor)
 )
 
 func (k EventKind) String() string {
@@ -21,6 +28,20 @@ func (k EventKind) String() string {
 		return "Restatement"
 	case EventLiquidation:
 		return "Liquidation"
+	case EventIPO:
+		return "IPO"
+	case EventBailout:
+		return "Bailout"
+	case EventAcquisition:
+		return "Acquisition"
+	case EventRestructuring:
+		return "Restructuring"
+	case EventReverseSplit:
+		return "ReverseSplit"
+	case EventChapter11:
+		return "Chapter11"
+	case EventMacro:
+		return "Macro"
 	default:
 		return "Unknown"
 	}
@@ -51,4 +72,15 @@ type Event struct {
 	// Kind == EventLiquidation.
 	LiquidatedAgentID string
 	LiquidationQty    float64
+
+	// IPO details populated when Kind == EventIPO
+	IPORevenue float64
+	IPOPrice   float64
+	IPOShares  float64
+
+	// DistressDetails populated when Kind is a distress event
+	DistressDetails string
+
+	// MacroHeadline populated when Kind == EventMacro
+	MacroHeadline string
 }

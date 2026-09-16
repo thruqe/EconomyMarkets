@@ -118,6 +118,13 @@ type SectorProfile struct {
 	// profile weight (see ReportingProfileWeights), not an absolute
 	// probability.
 	HighUncertaintyWeight float64
+
+	// PSMultipleMin/Max bound typical Price-to-Sales valuation multiples
+	// for this sector in equilibrium.
+	PSMultipleMin, PSMultipleMax float64
+
+	// NetMarginMin/Max bound typical net profit margins for this sector.
+	NetMarginMin, NetMarginMax float64
 }
 
 // sectorProfiles gives each sector a defensible baseline, directionally
@@ -128,17 +135,17 @@ type SectorProfile struct {
 // calibration — tune them once you're observing simulated behavior
 // and forming opinions about feel.
 var sectorProfiles = map[Sector]SectorProfile{
-	Energy:                {DriftMin: -0.0002, DriftMax: 0.0004, VolMin: 0.015, VolMax: 0.030, JumpRiskMultiplier: 1.3, HighUncertaintyWeight: 1.0},
-	Materials:             {DriftMin: 0.0000, DriftMax: 0.0004, VolMin: 0.012, VolMax: 0.022, JumpRiskMultiplier: 1.0, HighUncertaintyWeight: 0.8},
-	Industrials:           {DriftMin: 0.0001, DriftMax: 0.0004, VolMin: 0.010, VolMax: 0.018, JumpRiskMultiplier: 0.9, HighUncertaintyWeight: 0.6},
-	ConsumerDiscretionary: {DriftMin: 0.0001, DriftMax: 0.0005, VolMin: 0.012, VolMax: 0.022, JumpRiskMultiplier: 1.1, HighUncertaintyWeight: 0.9},
-	ConsumerStaples:       {DriftMin: 0.0001, DriftMax: 0.0003, VolMin: 0.006, VolMax: 0.012, JumpRiskMultiplier: 0.6, HighUncertaintyWeight: 0.3},
-	HealthCare:            {DriftMin: 0.0001, DriftMax: 0.0005, VolMin: 0.012, VolMax: 0.024, JumpRiskMultiplier: 1.4, HighUncertaintyWeight: 2.2}, // biotech-style uncertainty
-	Financials:            {DriftMin: 0.0000, DriftMax: 0.0003, VolMin: 0.010, VolMax: 0.020, JumpRiskMultiplier: 1.2, HighUncertaintyWeight: 0.7},
-	InformationTechnology: {DriftMin: 0.0002, DriftMax: 0.0007, VolMin: 0.015, VolMax: 0.028, JumpRiskMultiplier: 1.5, HighUncertaintyWeight: 1.8}, // speculative tech
-	CommunicationServices: {DriftMin: 0.0001, DriftMax: 0.0005, VolMin: 0.013, VolMax: 0.024, JumpRiskMultiplier: 1.2, HighUncertaintyWeight: 1.0},
-	Utilities:             {DriftMin: 0.0000, DriftMax: 0.0002, VolMin: 0.004, VolMax: 0.009, JumpRiskMultiplier: 0.4, HighUncertaintyWeight: 0.2}, // predictable cash flows
-	RealEstate:            {DriftMin: 0.0000, DriftMax: 0.0003, VolMin: 0.008, VolMax: 0.016, JumpRiskMultiplier: 0.7, HighUncertaintyWeight: 0.4},
+	Energy:                {DriftMin: 0.00001, DriftMax: 0.00005, VolMin: 0.0008, VolMax: 0.0018, JumpRiskMultiplier: 1.1, HighUncertaintyWeight: 0.9, PSMultipleMin: 1.2, PSMultipleMax: 2.5, NetMarginMin: 0.08, NetMarginMax: 0.18},
+	Materials:             {DriftMin: 0.00001, DriftMax: 0.00005, VolMin: 0.0007, VolMax: 0.0016, JumpRiskMultiplier: 1.0, HighUncertaintyWeight: 0.8, PSMultipleMin: 1.2, PSMultipleMax: 2.5, NetMarginMin: 0.07, NetMarginMax: 0.16},
+	Industrials:           {DriftMin: 0.00002, DriftMax: 0.00006, VolMin: 0.0007, VolMax: 0.0015, JumpRiskMultiplier: 0.9, HighUncertaintyWeight: 0.6, PSMultipleMin: 1.5, PSMultipleMax: 3.0, NetMarginMin: 0.08, NetMarginMax: 0.15},
+	ConsumerDiscretionary: {DriftMin: 0.00002, DriftMax: 0.00006, VolMin: 0.0008, VolMax: 0.0017, JumpRiskMultiplier: 1.1, HighUncertaintyWeight: 0.9, PSMultipleMin: 1.5, PSMultipleMax: 3.5, NetMarginMin: 0.06, NetMarginMax: 0.15},
+	ConsumerStaples:       {DriftMin: 0.00002, DriftMax: 0.00005, VolMin: 0.0004, VolMax: 0.0009, JumpRiskMultiplier: 0.6, HighUncertaintyWeight: 0.3, PSMultipleMin: 1.5, PSMultipleMax: 2.8, NetMarginMin: 0.07, NetMarginMax: 0.13},
+	HealthCare:            {DriftMin: 0.00002, DriftMax: 0.00007, VolMin: 0.0008, VolMax: 0.0018, JumpRiskMultiplier: 1.2, HighUncertaintyWeight: 1.8, PSMultipleMin: 3.5, PSMultipleMax: 7.5, NetMarginMin: 0.12, NetMarginMax: 0.25},
+	Financials:            {DriftMin: 0.00002, DriftMax: 0.00005, VolMin: 0.0006, VolMax: 0.0014, JumpRiskMultiplier: 1.0, HighUncertaintyWeight: 0.6, PSMultipleMin: 2.0, PSMultipleMax: 4.5, NetMarginMin: 0.15, NetMarginMax: 0.28},
+	InformationTechnology: {DriftMin: 0.00003, DriftMax: 0.00008, VolMin: 0.0009, VolMax: 0.0020, JumpRiskMultiplier: 1.3, HighUncertaintyWeight: 1.5, PSMultipleMin: 4.5, PSMultipleMax: 9.5, NetMarginMin: 0.18, NetMarginMax: 0.32},
+	CommunicationServices: {DriftMin: 0.00002, DriftMax: 0.00006, VolMin: 0.0007, VolMax: 0.0016, JumpRiskMultiplier: 1.1, HighUncertaintyWeight: 0.9, PSMultipleMin: 2.5, PSMultipleMax: 5.0, NetMarginMin: 0.10, NetMarginMax: 0.22},
+	Utilities:             {DriftMin: 0.00002, DriftMax: 0.00006, VolMin: 0.0005, VolMax: 0.0010, JumpRiskMultiplier: 0.4, HighUncertaintyWeight: 0.2, PSMultipleMin: 1.5, PSMultipleMax: 2.8, NetMarginMin: 0.08, NetMarginMax: 0.14},
+	RealEstate:            {DriftMin: 0.00002, DriftMax: 0.00005, VolMin: 0.0005, VolMax: 0.0012, JumpRiskMultiplier: 0.7, HighUncertaintyWeight: 0.4, PSMultipleMin: 3.0, PSMultipleMax: 6.0, NetMarginMin: 0.15, NetMarginMax: 0.30},
 }
 
 // CapTierProfile scales sector-baseline volatility and jump risk by
@@ -158,11 +165,14 @@ type CapTierProfile struct {
 	// companies tend to have a higher tradeable fraction; smaller/
 	// newer companies often have more concentrated closely-held stakes.
 	FloatFractionMin, FloatFractionMax float64
+
+	// RevenueMin/Max bound the annual revenue in USD for companies in this tier.
+	RevenueMin, RevenueMax float64
 }
 
 var capTierProfiles = map[CapTier]CapTierProfile{
-	MegaCap:  {VolMultiplier: 0.7, JumpMultiplier: 0.5, SharesOutstandingMin: 2_000_000_000, SharesOutstandingMax: 8_000_000_000, FloatFractionMin: 0.80, FloatFractionMax: 0.95},
-	LargeCap: {VolMultiplier: 0.9, JumpMultiplier: 0.8, SharesOutstandingMin: 300_000_000, SharesOutstandingMax: 2_000_000_000, FloatFractionMin: 0.70, FloatFractionMax: 0.90},
-	MidCap:   {VolMultiplier: 1.15, JumpMultiplier: 1.2, SharesOutstandingMin: 50_000_000, SharesOutstandingMax: 300_000_000, FloatFractionMin: 0.55, FloatFractionMax: 0.85},
-	SmallCap: {VolMultiplier: 1.5, JumpMultiplier: 1.8, SharesOutstandingMin: 5_000_000, SharesOutstandingMax: 50_000_000, FloatFractionMin: 0.35, FloatFractionMax: 0.75},
+	MegaCap:  {VolMultiplier: 0.7, JumpMultiplier: 0.5, SharesOutstandingMin: 2_000_000_000, SharesOutstandingMax: 8_000_000_000, FloatFractionMin: 0.80, FloatFractionMax: 0.95, RevenueMin: 25_000_000_000, RevenueMax: 150_000_000_000},
+	LargeCap: {VolMultiplier: 0.9, JumpMultiplier: 0.8, SharesOutstandingMin: 300_000_000, SharesOutstandingMax: 2_000_000_000, FloatFractionMin: 0.70, FloatFractionMax: 0.90, RevenueMin: 5_000_000_000, RevenueMax: 25_000_000_000},
+	MidCap:   {VolMultiplier: 1.15, JumpMultiplier: 1.2, SharesOutstandingMin: 50_000_000, SharesOutstandingMax: 300_000_000, FloatFractionMin: 0.55, FloatFractionMax: 0.85, RevenueMin: 1_000_000_000, RevenueMax: 5_000_000_000},
+	SmallCap: {VolMultiplier: 1.5, JumpMultiplier: 1.8, SharesOutstandingMin: 5_000_000, SharesOutstandingMax: 50_000_000, FloatFractionMin: 0.35, FloatFractionMax: 0.75, RevenueMin: 100_000_000, RevenueMax: 1_000_000_000},
 }

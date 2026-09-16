@@ -55,15 +55,15 @@ type JumpParams struct {
 // frequency over a ~1000-tick run.
 func DefaultJumpParams() JumpParams {
 	return JumpParams{
-		LambdaDown:         1.0 / 1000, // ~1 crisis-scale jump per 1000 ticks, before sector/cap scaling
-		LambdaUp:           1.0 / 2500, // roughly a third as frequent as downside — the asymmetry
-		DownJumpMin:        0.08,
-		DownJumpMax:        0.35,
-		UpJumpMin:          0.08,
+		LambdaDown:         1.0 / 2000, // downside jump frequency with leverage effect
+		LambdaUp:           1.0 / 2500, // positive growth catalyst frequency
+		DownJumpMin:        0.06,
+		DownJumpMax:        0.25,
+		UpJumpMin:          0.06,
 		UpJumpMax:          0.25,
-		ManiaProbability:   0.02, // 2% of upside jumps escalate to mania scale
+		ManiaProbability:   0.03, // 3% of upside jumps escalate to mania scale
 		ManiaMultiplierMin: 1.5,
-		ManiaMultiplierMax: 4.0,
+		ManiaMultiplierMax: 3.5,
 	}
 }
 
@@ -120,6 +120,9 @@ type JumpResult struct {
 // instant isn't a case worth modeling, so downside is checked first
 // and, if it doesn't fire, upside is checked.
 func rollJump(p JumpParams, rng *rand.Rand) JumpResult {
+	if rng == nil {
+		return JumpResult{Kind: NoJump, Multiplier: 1.0}
+	}
 	if rng.Float64() < p.LambdaDown {
 		frac := p.DownJumpMin + rng.Float64()*(p.DownJumpMax-p.DownJumpMin)
 		return JumpResult{Kind: CrisisJump, Multiplier: 1.0 - frac}

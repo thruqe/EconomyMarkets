@@ -1,6 +1,10 @@
 package company
 
-import "math/rand"
+import (
+	"math"
+	"math/rand"
+	"time"
+)
 
 // FundamentalEvent is the public record of a single tick's jump
 // outcome — the moment "the market learns something" about a
@@ -67,6 +71,29 @@ type Company struct {
 	SharesOutstanding float64
 	Float             float64
 
+	// Real-world corporate financial statements & valuation metrics
+	AnnualRevenue  float64 // Annual enterprise revenue in USD (e.g. $12.5B)
+	NetMargin      float64 // Net profit margin (e.g. 0.22 for 22%)
+	SectorMultiple float64 // Sector Price-to-Sales multiple (e.g. 5.5x)
+	IPOPrice       float64 // Offering price at listing
+	IsIPO          bool    // True if admitted dynamically as a new listing
+	IPOTick        int     // Tick number at which the company listed
+
+	// Macroeconomic & Corporate Balance Sheet Footprint
+	Headcount         float64 // Total employee headcount (e.g. 45,000)
+	AverageWage       float64 // Average annual compensation per employee (e.g. $85,000)
+	LaborExpense      float64 // Annual labor payroll costs (Headcount * AverageWage)
+	DebtOutstanding   float64 // Total corporate debt on balance sheet (USD)
+	InterestExpense   float64 // Annual interest expense (DebtOutstanding * borrowingRate)
+	CorporateTaxPaid  float64 // Annual income taxes paid to federal government
+	CapEx             float64 // Annual capital investment (contributes to GDP)
+	MacroDemandFactor float64 // Composite sector demand multiplier from consumer & trade
+
+	// Private vs Public Enterprise Lifecycle
+	IsPublic         bool    // True if listed on chartered stock exchange; false if private venture
+	Stage            string  // "Seed", "Growth", "Pre-IPO", "Public"
+	PrivateValuation float64 // Estimated valuation for private enterprises
+
 	drift      float64
 	volatility float64
 	jumpParams JumpParams
@@ -85,11 +112,204 @@ type Company struct {
 	// directly).
 	reportingBiasAccum float64
 
+	// sessionTicksRemaining and sessionDrift model persistent business/market session trends
+	// ensuring markets have decisive directional momentum rather than stationary white-noise barcode wicks.
+	sessionTicksRemaining int
+	sessionDrift          float64
+
 	// currentTick tracks how many times Tick has been called, purely
 	// so emitted events can carry a tick number without the caller
 	// having to pass one in — Company already knows its own position
 	// in time.
 	currentTick int
+}
+
+// MarketCap returns the true fundamental enterprise market capitalization.
+func (c *Company) MarketCap() float64 {
+	return c.TrueValue * c.SharesOutstanding
+}
+
+// ReportedMarketCap returns the disclosed/reported enterprise market capitalization.
+func (c *Company) ReportedMarketCap() float64 {
+	return c.ReportedValue * c.SharesOutstanding
+}
+
+// NetIncome returns the annual net profit/earnings of the company.
+func (c *Company) NetIncome() float64 {
+	return c.AnnualRevenue * c.NetMargin
+}
+
+// EarningsPerShare returns the fundamental earnings per share (EPS).
+func (c *Company) EarningsPerShare() float64 {
+	if c.SharesOutstanding <= 0 {
+		return 0
+	}
+	return c.NetIncome() / c.SharesOutstanding
+}
+
+// PriceToEarnings computes the current P/E multiple relative to a market price.
+func (c *Company) PriceToEarnings(marketPrice float64) float64 {
+	eps := c.EarningsPerShare()
+	if eps <= 0 {
+		return 0
+	}
+	return marketPrice / eps
+}
+
+// PriceToSales computes the current P/S multiple relative to a market price.
+func (c *Company) PriceToSales(marketPrice float64) float64 {
+	if c.AnnualRevenue <= 0 {
+		return 0
+	}
+	return (marketPrice * c.SharesOutstanding) / c.AnnualRevenue
+}
+
+// OperatingIncome returns enterprise operating profit (EBIT) before interest and taxes.
+func (c *Company) OperatingIncome() float64 {
+	opMargin := c.NetMargin * 1.35
+	return c.AnnualRevenue * opMargin
+}
+
+// UpdateMacro applies national macroeconomic conditions to the enterprise:
+// - hourlyWage: prevailing national average wage
+// - corporateTaxRate: statutory corporate tax rate (e.g. 0.21)
+// - borrowingRate: benchmark treasury / commercial debt yield
+// - demandMultiplier: sector composite demand factor from consumer spending, foreign trade, and government procurement
+// - tickFractionOfYear: fraction of calendar year per tick
+func (c *Company) UpdateMacro(hourlyWage float64, corporateTaxRate float64, borrowingRate float64, demandMultiplier float64, tickFractionOfYear float64) {
+	if demandMultiplier > 0 {
+		c.MacroDemandFactor = demandMultiplier
+	} else {
+		c.MacroDemandFactor = 1.0
+	}
+
+	// 1. Update labor costs based on national wage level and sector wage premium
+	if hourlyWage > 0 && c.Headcount > 0 {
+		sectorPremium := c.AverageWage / 70000.0
+		if sectorPremium < 0.6 {
+			sectorPremium = 0.6
+		} else if sectorPremium > 2.5 {
+			sectorPremium = 2.5
+		}
+		c.AverageWage = hourlyWage * 2000.0 * sectorPremium
+		c.LaborExpense = c.Headcount * c.AverageWage
+	}
+
+	// 2. Update interest expense based on national debt yield + credit risk spread
+	creditSpread := 0.015
+	if c.CapTier == SmallCap {
+		creditSpread = 0.035
+	} else if c.CapTier == MidCap {
+		creditSpread = 0.022
+	}
+	c.InterestExpense = c.DebtOutstanding * (borrowingRate + creditSpread)
+
+	// 3. Update tax obligations: taxable income = EBIT - Interest
+	ebit := c.OperatingIncome()
+	taxableIncome := ebit - c.InterestExpense
+	if taxableIncome > 0 {
+		c.CorporateTaxPaid = taxableIncome * corporateTaxRate
+	} else {
+		c.CorporateTaxPaid = 0
+	}
+
+	// 4. Macro demand influences annual revenue drift:
+	revenueGrowth := (c.MacroDemandFactor - 1.0) * 0.05
+	c.AnnualRevenue *= (1.0 + revenueGrowth*tickFractionOfYear)
+	if c.AnnualRevenue < 1_000_000.0 {
+		c.AnnualRevenue = 1_000_000.0
+	}
+
+	// 5. Headcount adapts gradually to revenue scale
+	if c.Headcount > 0 {
+		revPerEmp := c.AnnualRevenue / c.Headcount
+		if revPerEmp > 0 {
+			targetHeadcount := c.AnnualRevenue / revPerEmp
+			c.Headcount = 0.99*c.Headcount + 0.01*targetHeadcount
+		}
+	}
+}
+
+// Volatility returns the annual volatility parameter of the company.
+func (c *Company) Volatility() float64 {
+	return c.volatility
+}
+
+// InitRuntime initializes unexported runtime fields (RNG, jump parameters, drift,
+// volatility, reporting profile) needed for simulation execution.
+// This is idempotent and safely ensures deserialized companies or newly created
+// companies are fully ready for Tick() execution.
+func (c *Company) InitRuntime(rng *rand.Rand) {
+	if rng != nil {
+		c.rng = rng
+	} else if c.rng == nil {
+		var seed int64
+		for _, b := range []byte(c.Symbol) {
+			seed = seed*31 + int64(b)
+		}
+		if seed == 0 {
+			seed = time.Now().UnixNano()
+		}
+		c.rng = rand.New(rand.NewSource(seed))
+	}
+
+	sp, ok := sectorProfiles[c.Sector]
+	if !ok {
+		sp = sectorProfiles[InformationTechnology]
+	}
+	cp, ok := capTierProfiles[c.CapTier]
+	if !ok {
+		cp = capTierProfiles[MidCap]
+	}
+
+	if c.volatility == 0 {
+		volMult := cp.VolMultiplier
+		if volMult <= 0 {
+			volMult = 1.0
+		}
+		volSpan := sp.VolMax - sp.VolMin
+		if volSpan <= 0 {
+			c.volatility = 0.0012 * volMult
+		} else {
+			c.volatility = (sp.VolMin + c.rng.Float64()*volSpan) * volMult
+		}
+	}
+
+	if c.drift == 0 {
+		driftSpan := sp.DriftMax - sp.DriftMin
+		if driftSpan <= 0 {
+			c.drift = 0.00003
+		} else {
+			c.drift = sp.DriftMin + c.rng.Float64()*driftSpan
+		}
+	}
+
+	if c.jumpParams.LambdaDown == 0 && c.jumpParams.LambdaUp == 0 {
+		jumpRisk := sp.JumpRiskMultiplier
+		if jumpRisk <= 0 {
+			jumpRisk = 1.0
+		}
+		tierJump := cp.JumpMultiplier
+		if tierJump <= 0 {
+			tierJump = 1.0
+		}
+		c.jumpParams = DefaultJumpParams().Scaled(jumpRisk, tierJump)
+	}
+
+	if c.reporting.NoiseStdDev == 0 && c.reporting.PersistentBias == 0 && c.reporting.RestatementProbability == 0 {
+		profile := chooseReportingProfile(c.Sector, c.rng)
+		c.reporting = reportingParamsFor(profile, c.rng)
+	}
+
+	if c.MacroDemandFactor <= 0 {
+		c.MacroDemandFactor = 1.0
+	}
+	if c.TrueValue <= 0 {
+		c.TrueValue = 10.0
+	}
+	if c.ReportedValue <= 0 {
+		c.ReportedValue = c.TrueValue
+	}
 }
 
 // Tick advances TrueValue and ReportedValue by exactly one time step.
@@ -106,7 +326,32 @@ type Company struct {
 // occur on any given tick, since they represent orthogonal mechanisms
 // (real operational shocks vs. reporting-integrity corrections).
 func (c *Company) Tick() (FundamentalEvent, *RestatementEvent) {
+	if c.rng == nil {
+		c.InitRuntime(nil)
+	}
 	c.currentTick++
+
+	// Decisive session trend momentum:
+	// A company experiences distinct market sessions (e.g. 600 to 1800 ticks = ~2.5 to 7.5 minutes)
+	// where business performance, product demand, and sector dynamics drive clear directional movement.
+	if c.sessionTicksRemaining <= 0 {
+		if c.rng != nil {
+			c.sessionTicksRemaining = 600 + c.rng.Intn(1200)
+			roll := c.rng.Float64()
+			if roll < 0.52 {
+				// Bullish session: positive growth drift
+				c.sessionDrift = 0.00003 + c.rng.Float64()*0.00006
+			} else if roll < 0.85 {
+				// Bearish / Pullback session: mild negative drift
+				c.sessionDrift = -0.00002 - c.rng.Float64()*0.00004
+			} else {
+				// Neutral / Consolidation session
+				c.sessionDrift = (c.rng.Float64() - 0.45) * 0.00002
+			}
+		}
+	} else {
+		c.sessionTicksRemaining--
+	}
 
 	jump := rollJump(c.jumpParams, c.rng)
 	event := FundamentalEvent{Symbol: c.Symbol, Tick: c.currentTick, Kind: jump.Kind, Multiplier: jump.Multiplier}
@@ -124,11 +369,18 @@ func (c *Company) Tick() (FundamentalEvent, *RestatementEvent) {
 			// without dividing-by-zero or sign-flip issues downstream.
 		}
 	} else {
-		// Ordinary GBM step: dV/V = drift*dt + vol*dW, with dt
-		// implicitly 1 tick. Using a standard normal draw scaled by
-		// volatility for the Wiener increment.
-		z := c.rng.NormFloat64()
-		c.TrueValue *= 1 + c.drift + c.volatility*z
+		// Ordinary GBM step with session momentum
+		z := 0.0
+		if c.rng != nil {
+			z = c.rng.NormFloat64()
+		}
+		macroDrift := (c.MacroDemandFactor - 1.0) * 0.00003
+		interestDrag := 0.0
+		if c.AnnualRevenue > 0 {
+			interestDrag = (c.InterestExpense / c.AnnualRevenue) * 0.00001
+		}
+		effectiveDrift := c.drift + c.sessionDrift + macroDrift - interestDrag
+		c.TrueValue *= 1 + effectiveDrift + c.volatility*z
 		if c.TrueValue < 0.01 {
 			c.TrueValue = 0.01
 		}
@@ -153,6 +405,13 @@ func (c *Company) tickReporting() *RestatementEvent {
 	// HighUncertainty have PersistentBias == 0, so their accumulator
 	// never moves and their gap stays purely noise-driven.
 	c.reportingBiasAccum += c.reporting.PersistentBias
+	// Bound accumulated bias so it does not drift unbounded to negative or positive infinity
+	// over long-running simulations (e.g. conservative bias driving value to zero).
+	if c.reportingBiasAccum > 0.45 {
+		c.reportingBiasAccum = 0.45
+	} else if c.reportingBiasAccum < -0.25 {
+		c.reportingBiasAccum = -0.25
+	}
 
 	// This tick's ReportedValue: TrueValue adjusted by the
 	// accumulated bias plus fresh, non-persistent noise.
@@ -233,10 +492,10 @@ func GenerateCompany(sector Sector, tier CapTier, params GenerationParams, rng *
 
 	jumpParams := params.BaseJumpParams.Scaled(sp.JumpRiskMultiplier, cp.JumpMultiplier)
 
-	startingValue := params.StartingValueMin + rng.Float64()*(params.StartingValueMax-params.StartingValueMin)
-
 	shares := cp.SharesOutstandingMin + rng.Float64()*(cp.SharesOutstandingMax-cp.SharesOutstandingMin)
 	floatFraction := cp.FloatFractionMin + rng.Float64()*(cp.FloatFractionMax-cp.FloatFractionMin)
+
+	startingValue := params.StartingValueMin + rng.Float64()*(params.StartingValueMax-params.StartingValueMin)
 
 	name := GenerateName(sector, rng)
 	symbol := GenerateSymbol(name, usedSymbols)
@@ -244,7 +503,11 @@ func GenerateCompany(sector Sector, tier CapTier, params GenerationParams, rng *
 	reportingProfile := chooseReportingProfile(sector, rng)
 	reportingParams := reportingParamsFor(reportingProfile, rng)
 
-	return &Company{
+	margin := sp.NetMarginMin + rng.Float64()*(sp.NetMarginMax-sp.NetMarginMin)
+	multiple := sp.PSMultipleMin + rng.Float64()*(sp.PSMultipleMax-sp.PSMultipleMin)
+	revenue := (startingValue * shares) / multiple
+
+	c := &Company{
 		Symbol:            symbol,
 		Name:              name,
 		Sector:            sector,
@@ -253,12 +516,187 @@ func GenerateCompany(sector Sector, tier CapTier, params GenerationParams, rng *
 		ReportedValue:     startingValue, // starts in sync; divergence accumulates via Tick
 		SharesOutstanding: shares,
 		Float:             shares * floatFraction,
+		AnnualRevenue:     revenue,
+		NetMargin:         margin,
+		SectorMultiple:    multiple,
+		IPOPrice:          startingValue,
+		IsIPO:             false,
+		IPOTick:           0,
+		IsPublic:          true,
+		Stage:             "Public",
 		drift:             drift,
 		volatility:        vol,
 		jumpParams:        jumpParams,
 		rng:               rng,
 		reporting:         reportingParams,
 	}
+	initMacroMetrics(c, rng)
+	return c
+}
+
+// GenerateIPOCompany produces an enterprise IPO with specific or procedurally sampled multi-billion revenue.
+func GenerateIPOCompany(sector Sector, tier CapTier, customRevenue float64, tick int, rng *rand.Rand, usedSymbols map[string]bool) *Company {
+	sp := sectorProfiles[sector]
+	cp := capTierProfiles[tier]
+
+	drift := sp.DriftMin + rng.Float64()*(sp.DriftMax-sp.DriftMin)
+	vol := (sp.VolMin + rng.Float64()*(sp.VolMax-sp.VolMin)) * cp.VolMultiplier
+
+	baseJump := DefaultJumpParams()
+	jumpParams := baseJump.Scaled(sp.JumpRiskMultiplier, cp.JumpMultiplier)
+
+	shares := cp.SharesOutstandingMin + rng.Float64()*(cp.SharesOutstandingMax-cp.SharesOutstandingMin)
+	floatFraction := cp.FloatFractionMin + rng.Float64()*(cp.FloatFractionMax-cp.FloatFractionMin)
+
+	revenue := customRevenue
+	if revenue <= 0 {
+		revenue = cp.RevenueMin + rng.Float64()*(cp.RevenueMax-cp.RevenueMin)
+	}
+
+	margin := sp.NetMarginMin + rng.Float64()*(sp.NetMarginMax-sp.NetMarginMin)
+	multiple := sp.PSMultipleMin + rng.Float64()*(sp.PSMultipleMax-sp.PSMultipleMin)
+
+	impliedMarketCap := revenue * multiple
+	startingValue := impliedMarketCap / shares
+	if startingValue < 5.0 {
+		startingValue = 5.0
+	} else if startingValue > 1500.0 {
+		startingValue = 1500.0
+	}
+
+	name := GenerateName(sector, rng)
+	symbol := GenerateSymbol(name, usedSymbols)
+
+	reportingProfile := chooseReportingProfile(sector, rng)
+	reportingParams := reportingParamsFor(reportingProfile, rng)
+
+	c := &Company{
+		Symbol:            symbol,
+		Name:              name,
+		Sector:            sector,
+		CapTier:           tier,
+		TrueValue:         startingValue,
+		ReportedValue:     startingValue,
+		SharesOutstanding: shares,
+		Float:             shares * floatFraction,
+		AnnualRevenue:     revenue,
+		NetMargin:         margin,
+		SectorMultiple:    multiple,
+		IPOPrice:          startingValue,
+		IsIPO:             true,
+		IPOTick:           tick,
+		IsPublic:          true,
+		Stage:             "Public",
+		drift:             drift,
+		volatility:        vol,
+		jumpParams:        jumpParams,
+		rng:               rng,
+		reporting:         reportingParams,
+	}
+	initMacroMetrics(c, rng)
+	return c
+}
+
+// GeneratePrivateEnterprise produces an emerging local business (pre-market, seed or growth stage).
+func GeneratePrivateEnterprise(sector Sector, seedRevenue float64, tick int, rng *rand.Rand, usedSymbols map[string]bool) *Company {
+	c := GenerateIPOCompany(sector, SmallCap, seedRevenue, tick, rng, usedSymbols)
+	c.IsPublic = false
+	c.IsIPO = false
+	c.Stage = "Seed"
+	if seedRevenue > 25_000_000 {
+		c.Stage = "Growth"
+	}
+	c.PrivateValuation = c.AnnualRevenue * c.SectorMultiple
+	return c
+}
+
+
+func initMacroMetrics(c *Company, rng *rand.Rand) {
+	c.MacroDemandFactor = 1.0
+
+	var revPerEmp float64
+	var avgWage float64
+	var debtToRev float64
+	var capexToRev float64
+
+	switch c.Sector {
+	case InformationTechnology:
+		revPerEmp = 600_000
+		avgWage = 140_000
+		debtToRev = 0.35
+		capexToRev = 0.08
+	case Financials:
+		revPerEmp = 450_000
+		avgWage = 130_000
+		debtToRev = 1.20
+		capexToRev = 0.04
+	case HealthCare:
+		revPerEmp = 480_000
+		avgWage = 115_000
+		debtToRev = 0.50
+		capexToRev = 0.09
+	case Energy:
+		revPerEmp = 850_000
+		avgWage = 110_000
+		debtToRev = 0.65
+		capexToRev = 0.13
+	case ConsumerDiscretionary:
+		revPerEmp = 240_000
+		avgWage = 52_000
+		debtToRev = 0.60
+		capexToRev = 0.05
+	case ConsumerStaples:
+		revPerEmp = 290_000
+		avgWage = 55_000
+		debtToRev = 0.55
+		capexToRev = 0.04
+	case Industrials:
+		revPerEmp = 330_000
+		avgWage = 80_000
+		debtToRev = 0.60
+		capexToRev = 0.06
+	case Materials:
+		revPerEmp = 380_000
+		avgWage = 78_000
+		debtToRev = 0.70
+		capexToRev = 0.08
+	case CommunicationServices:
+		revPerEmp = 520_000
+		avgWage = 120_000
+		debtToRev = 0.85
+		capexToRev = 0.11
+	case Utilities:
+		revPerEmp = 650_000
+		avgWage = 95_000
+		debtToRev = 1.40
+		capexToRev = 0.15
+	case RealEstate:
+		revPerEmp = 450_000
+		avgWage = 90_000
+		debtToRev = 1.50
+		capexToRev = 0.10
+	default:
+		revPerEmp = 350_000
+		avgWage = 75_000
+		debtToRev = 0.60
+		capexToRev = 0.06
+	}
+
+	if rng != nil {
+		revPerEmp *= (0.85 + rng.Float64()*0.30)
+		avgWage *= (0.90 + rng.Float64()*0.20)
+		debtToRev *= (0.80 + rng.Float64()*0.40)
+	}
+
+	c.Headcount = math.Max(25.0, math.Round(c.AnnualRevenue/revPerEmp))
+	c.AverageWage = avgWage
+	c.LaborExpense = c.Headcount * c.AverageWage
+	c.DebtOutstanding = c.AnnualRevenue * debtToRev
+	c.InterestExpense = c.DebtOutstanding * 0.045
+	c.CapEx = c.AnnualRevenue * capexToRev
+
+	taxable := math.Max(0, c.AnnualRevenue*c.NetMargin*1.35-c.InterestExpense)
+	c.CorporateTaxPaid = taxable * 0.21
 }
 
 // GenerateUniverse deterministically produces n companies from a

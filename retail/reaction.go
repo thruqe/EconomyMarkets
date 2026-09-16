@@ -81,29 +81,23 @@ var reactionFuncs = map[Archetype]ReactionFunc{
 	},
 
 	PanicProne: func(s Signal, baseActivity float64) ActionProbabilities {
-		// Asymmetric: small positive momentum barely registers (a
-		// dampened buy response), but negative momentum is amplified
-		// disproportionately into a sell response — a squared term on
-		// the negative side produces exactly this asymmetry, since
-		// squaring a small negative fraction still yields a small
-		// value but the amplification factor below grows it sharply
-		// for larger drops.
+		// Asymmetric: small positive momentum registers mild buy response,
+		// but negative momentum is amplified sharply into a sell response.
 		if s.Momentum >= 0 {
-			buy := baseActivity * 0.3 * sigmoid(s.Momentum*10)
-			hold := 1 - buy
-			return normalize(buy, 0, hold)
+			buy := baseActivity * (0.10 + 0.30*sigmoid(s.Momentum*10))
+			sell := baseActivity * 0.05
+			hold := 1 - buy - sell
+			return normalize(buy, sell, hold)
 		}
 		amplified := math.Min(1, math.Abs(s.Momentum)*40) // sharp amplification of drops
-		sell := baseActivity * amplified
+		sell := baseActivity * (0.20 + 0.80*amplified)
 		hold := 1 - sell
 		return normalize(0, sell, hold)
 	},
 
 	Disciplined: func(s Signal, baseActivity float64) ActionProbabilities {
-		// Small, dampened reactions across the board — same direction
-		// as MomentumChaser but heavily scaled down, reflecting a
-		// patient trader who mostly holds.
-		dampened := baseActivity * 0.25
+		// Small, dampened reactions across the board with steady baseline engagement.
+		dampened := baseActivity * 0.35
 		strength := sigmoid(s.Momentum * 20)
 		buy := dampened * strength
 		sell := dampened * (1 - strength)
@@ -112,11 +106,9 @@ var reactionFuncs = map[Archetype]ReactionFunc{
 	},
 
 	Degenerate: func(s Signal, baseActivity float64) ActionProbabilities {
-		// Reacts to volatility itself, not direction: high volatility
-		// raises overall activity substantially, and direction is
-		// picked roughly at random (slight momentum lean) rather than
-		// being the primary driver.
-		volDriven := baseActivity * math.Min(1, s.Volatility*8)
+		// Reacts to volatility itself with a reliable baseline activity floor (0.35)
+		// ensuring ongoing speculative retail flow so the market never permanently dies.
+		volDriven := baseActivity * (0.35 + 0.65*math.Min(1, s.Volatility*8))
 		directionLean := sigmoid(s.Momentum * 10) // mild lean, not the main driver
 		buy := volDriven * directionLean
 		sell := volDriven * (1 - directionLean)

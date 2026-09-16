@@ -81,14 +81,20 @@ func (b *OrderBook) Spread() (float64, bool) {
 	return ask - bid, true
 }
 
-// MidPrice returns (bid+ask)/2, or (0, false) if either side is empty.
+// MidPrice returns (bid+ask)/2, or if only one side has liquidity, returns that side's best price.
 func (b *OrderBook) MidPrice() (float64, bool) {
 	bid, ok1 := b.BestBid()
 	ask, ok2 := b.BestAsk()
-	if !ok1 || !ok2 {
-		return 0, false
+	if ok1 && ok2 {
+		return (bid + ask) / 2, true
 	}
-	return (bid + ask) / 2, true
+	if ok1 {
+		return bid, true
+	}
+	if ok2 {
+		return ask, true
+	}
+	return 0, false
 }
 
 // AddLimitOrder places a resting limit order on the book without matching.
@@ -103,6 +109,30 @@ func (b *OrderBook) AddLimitOrder(o *Order) {
 	} else {
 		b.asks = insertLevel(b.asks, o, false)
 	}
+}
+
+// CancelAgentOrders removes all unexecuted resting orders belonging to agentID from both sides of the book.
+// Essential for market makers so quotes are refreshed each tick rather than accumulating indefinitely.
+func (b *OrderBook) CancelAgentOrders(agentID string) {
+	b.bids = filterLevels(b.bids, agentID)
+	b.asks = filterLevels(b.asks, agentID)
+}
+
+func filterLevels(levels []*priceLevel, agentID string) []*priceLevel {
+	var remaining []*priceLevel
+	for _, lvl := range levels {
+		var active []*Order
+		for _, o := range lvl.orders {
+			if o.AgentID != agentID {
+				active = append(active, o)
+			}
+		}
+		if len(active) > 0 {
+			lvl.orders = active
+			remaining = append(remaining, lvl)
+		}
+	}
+	return remaining
 }
 
 func insertLevel(levels []*priceLevel, o *Order, descending bool) []*priceLevel {
@@ -212,4 +242,45 @@ func (b *OrderBook) DepthAtLevels(n int) (bidQty, askQty float64) {
 		}
 	}
 	return bidQty, askQty
+}
+
+// BookLevel summarizes price, cumulative quantity, and order count at a single price tier.
+type BookLevel struct {
+	Price       float64 `json:"price"`
+	Quantity    float64 `json:"quantity"`
+	OrdersCount int     `json:"orders_count"`
+}
+
+// TopLevels returns the top n resting price levels for bids (highest first) and asks (lowest first).
+func (b *OrderBook) TopLevels(n int) (bids, asks []BookLevel) {
+	if n <= 0 {
+		n = 15
+	}
+	bids = make([]BookLevel, 0)
+	asks = make([]BookLevel, 0)
+	for i := 0; i < n && i < len(b.bids); i++ {
+		lvl := b.bids[i]
+		var totalQty float64
+		for _, o := range lvl.orders {
+			totalQty += o.Quantity
+		}
+		bids = append(bids, BookLevel{
+			Price:       lvl.price,
+			Quantity:    totalQty,
+			OrdersCount: len(lvl.orders),
+		})
+	}
+	for i := 0; i < n && i < len(b.asks); i++ {
+		lvl := b.asks[i]
+		var totalQty float64
+		for _, o := range lvl.orders {
+			totalQty += o.Quantity
+		}
+		asks = append(asks, BookLevel{
+			Price:       lvl.price,
+			Quantity:    totalQty,
+			OrdersCount: len(lvl.orders),
+		})
+	}
+	return bids, asks
 }

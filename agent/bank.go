@@ -67,6 +67,13 @@ type Bank struct {
 	// over currentPricesAcrossCoverage's ReportedValue-based fallback
 	// for any covered symbol it contains.
 	externalPrices map[string]float64
+
+	// ExecutionRate (0-1] controls what fraction of the target rebalance delta
+	// is executed per tick (TWAP/VWAP style slicing). Defaults to 1.0 (immediate full-delta attempt).
+	ExecutionRate float64
+
+	// MaxOrderShares optionally caps the maximum share quantity for a single order (0 = unlimited).
+	MaxOrderShares float64
 }
 
 // NewBank constructs a Bank covering the given companies from one
@@ -86,6 +93,8 @@ func NewBank(id string, acct *market.Account, coverage []*company.Company) *Bank
 		SkepticismDiscount:      0.50, // more conservative than HedgeFund's 0.35
 		DrawdownDeRiskThreshold: 0.10, // de-risking begins at 10% drawdown from peak
 		DrawdownFullCutoff:      0.30, // no new risk at all by 30% drawdown from peak
+		ExecutionRate:           1.0,  // default to full delta execution for test compatibility
+		MaxOrderShares:          0,    // 0 = no cap
 	}
 }
 
@@ -195,6 +204,15 @@ func (b *Bank) NextOrders(state market.MarketState) []*market.Order {
 		b.SkepticismDiscount,
 	)
 	if order == nil {
+		return nil
+	}
+	if b.ExecutionRate > 0 && b.ExecutionRate < 1.0 {
+		order.Quantity *= b.ExecutionRate
+	}
+	if b.MaxOrderShares > 0 && order.Quantity > b.MaxOrderShares {
+		order.Quantity = b.MaxOrderShares
+	}
+	if order.Quantity <= 0 {
 		return nil
 	}
 	return []*market.Order{order}

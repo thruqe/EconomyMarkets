@@ -1,5 +1,7 @@
 package market
 
+import "time"
+
 // PositionSide mirrors Side but reads more naturally when describing
 // a held position rather than an order direction.
 type PositionSide int
@@ -14,6 +16,7 @@ type Position struct {
 	Side      PositionSide
 	Quantity  float64
 	EntryCost float64 // total cash paid/received at entry (before leverage math)
+	OpenedAt  int64   // UnixNano timestamp when position was opened
 }
 
 // Account tracks one agent's capital and leverage state. This is
@@ -146,27 +149,57 @@ func ApplySettledFill(acct *Account, symbol string, side Side, quantity, price f
 
 	pos, ok := acct.Positions[symbol]
 	if !ok {
-		acct.Positions[symbol] = &Position{Side: positionSide, Quantity: quantity, EntryCost: quantity * price}
+		acct.Positions[symbol] = &Position{
+			Side:      positionSide,
+			Quantity:  quantity,
+			EntryCost: quantity * price,
+			OpenedAt:  time.Now().UnixNano(),
+		}
 		return
 	}
 
 	if pos.Side == positionSide {
 		pos.Quantity += quantity
 		pos.EntryCost += quantity * price
+		if pos.OpenedAt == 0 {
+			pos.OpenedAt = time.Now().UnixNano()
+		}
 		return
 	}
 
 	// Opposing fill: reduces the existing position, or fully closes
 	// and flips to the other side if this fill's quantity exceeds
 	// what was held.
+	avgCost := pos.EntryCost / pos.Quantity
+	closedQty := quantity
+	if pos.Quantity < closedQty {
+		closedQty = pos.Quantity
+	}
+
+	var realizedPnL float64
+	if pos.Side == Long {
+		realizedPnL = closedQty * (price - avgCost)
+	} else {
+		realizedPnL = closedQty * (avgCost - price)
+	}
+	acct.Cash += realizedPnL
+
 	if quantity < pos.Quantity {
 		pos.Quantity -= quantity
+		pos.EntryCost = pos.Quantity * avgCost
 		return
 	}
+
 	remainder := quantity - pos.Quantity
+	if remainder == 0 {
+		delete(acct.Positions, symbol)
+		return
+	}
+
 	pos.Side = positionSide
 	pos.Quantity = remainder
 	pos.EntryCost = remainder * price
+	pos.OpenedAt = time.Now().UnixNano()
 }
 
 // LiquidationEngine scans a set of accounts each tick and generates

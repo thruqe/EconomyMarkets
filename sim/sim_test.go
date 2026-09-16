@@ -1,6 +1,7 @@
 package sim
 
 import (
+	"math/rand"
 	"testing"
 
 	"economy/agent"
@@ -26,7 +27,9 @@ func buildSmallSlice(t *testing.T) *Simulation {
 	}
 
 	for _, co := range universe {
-		mm := agent.NewMarketMaker("mm_"+co.Symbol, 5_000_000, 10, 0.10)
+		mm := agent.NewMarketMaker("mm_"+co.Symbol, 10_000_000, 10, 0.10)
+		mm.MaxInventory = 50_000
+		mm.QuoteSize = 500
 		s.AddParticipant(mm, co.Symbol)
 
 		hfAcct := market.NewAccount("hf_"+co.Symbol, 2_000_000, 5, 0.10)
@@ -58,11 +61,11 @@ func buildSmallSlice(t *testing.T) *Simulation {
 	for _, symbol := range s.Symbols() {
 		book := s.Book(symbol)
 		mid := s.Company(symbol).TrueValue
-		for i := range 20 {
-			bid := mid * (1 - 0.001*float64(i+1))
-			ask := mid * (1 + 0.001*float64(i+1))
-			book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Buy, Price: bid, Quantity: 500})
-			book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Sell, Price: ask, Quantity: 500})
+		for i := range 50 {
+			bid := mid * (1 - 0.005*float64(i+1))
+			ask := mid * (1 + 0.005*float64(i+1))
+			book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Buy, Price: bid, Quantity: 2000})
+			book.AddLimitOrder(&market.Order{AgentID: "seed", Side: market.Sell, Price: ask, Quantity: 2000})
 		}
 	}
 
@@ -140,19 +143,26 @@ func TestLiquidationCascadeIntegration(t *testing.T) {
 	symbol := s.Symbols()[0]
 	book := s.Book(symbol)
 
+	co := s.Company(symbol)
+
 	// A tightly-leveraged human trader account, forced long, about to
 	// get run over by a sharp drop.
 	acct := market.NewAccount("victim", 10_000, 5, 0.10)
 	victim := retail.NewHumanTrader("victim", acct)
 	s.AddParticipant(victim, symbol)
 
-	market.ApplySettledFill(acct, symbol, market.Buy, 500, 100.0) // large, leveraged long
+	mid, _ := book.MidPrice()
+	market.ApplySettledFill(acct, symbol, market.Buy, 500, mid) // large, leveraged long
 
 	// Drain existing resting bids for this symbol out of contention by
 	// adding a large sell that walks price down hard, simulating an
 	// adverse move steep enough to breach maintenance margin.
-	book.AddLimitOrder(&market.Order{AgentID: "seed_far", Side: market.Buy, Price: 40.0, Quantity: 100000})
-	crash := &market.Order{AgentID: "crash_seller", Side: market.Sell, Quantity: 3000, IsMarket: true}
+	crashPrice := mid * 0.4
+	co.TrueValue = crashPrice
+	co.ReportedValue = crashPrice
+
+	book.AddLimitOrder(&market.Order{AgentID: "seed_far", Side: market.Buy, Price: crashPrice, Quantity: 1_000_000})
+	crash := &market.Order{AgentID: "crash_seller", Side: market.Sell, Quantity: 150000, IsMarket: true}
 	book.Submit(crash)
 
 	s.Step()
@@ -212,21 +222,21 @@ func TestBankReceivesExternalPrices(t *testing.T) {
 	// all (Account.Equity only marks held Positions to market), so
 	// this step is necessary for the test's premise to hold, not
 	// optional setup.
-	victimCo.ReportedValue = victimCo.TrueValue * 1.5
+	victimCo.TrueValue = victimCo.TrueValue * 1.5
 	for range 3 {
 		s.Step()
 	}
 	if _, hasPosition := bankAcct.Positions[victimCo.Symbol]; !hasPosition {
 		t.Fatalf("expected the bank to have opened a position in victimCo from its large mispricing before the crash — test setup invalid")
 	}
-	victimCo.ReportedValue = victimCo.TrueValue // reset so the position isn't still being added to during the crash phase below
+	victimCo.TrueValue = victimCo.TrueValue / 1.5 // reset so the position isn't still being added to during the crash phase below
 
 	// A large real market sell crashes victimCo's price hard, through
 	// genuine order-book trading — not a direct field mutation — so
 	// this specifically tests whether Step's real market prices reach
 	// the bank, not whether the underlying drawdown math works (that's
 	// already proven in package agent's own tests).
-	crash := &market.Order{AgentID: "crash_seller", Side: market.Sell, Quantity: 15000, IsMarket: true}
+	crash := &market.Order{AgentID: "crash_seller", Side: market.Sell, Quantity: 30000, IsMarket: true}
 	s.Book(victimCo.Symbol).Submit(crash)
 
 	for range 5 {
@@ -265,3 +275,85 @@ func TestBankReceivesExternalPrices(t *testing.T) {
 			freshOrders[0].Quantity, drawnDownQty)
 	}
 }
+
+func TestSimulationListIPO(t *testing.T) {
+	s := buildSmallSlice(t)
+	initialCompanyCount := len(s.Symbols())
+
+	used := make(map[string]bool)
+	for _, sym := range s.Symbols() {
+		used[sym] = true
+	}
+
+	rng := rand.New(rand.NewSource(999))
+	ipoCo := company.GenerateIPOCompany(company.InformationTechnology, company.MegaCap, 18_000_000_000, s.Tick(), rng, used)
+
+	s.ListIPO(ipoCo, 50_000_000)
+
+	if len(s.Symbols()) != initialCompanyCount+1 {
+		t.Fatalf("expected symbol count %d, got %d", initialCompanyCount+1, len(s.Symbols()))
+	}
+
+	book := s.Book(ipoCo.Symbol)
+	if book == nil {
+		t.Fatalf("expected registered order book for %s", ipoCo.Symbol)
+	}
+
+	mid, hasMid := book.MidPrice()
+	if !hasMid || mid <= 0 {
+		t.Fatalf("expected valid mid price for newly listed IPO %s, got %.2f", ipoCo.Symbol, mid)
+	}
+
+	// Advance simulation steps with the new IPO trading
+	for range 20 {
+		report := s.Step()
+		if report == nil {
+			t.Fatalf("expected non-nil step report")
+		}
+	}
+
+	// Verify IPO event was logged
+	foundIPOEvent := false
+	for _, e := range s.EventLog {
+		if e.Kind == EventIPO && e.Symbol == ipoCo.Symbol {
+			foundIPOEvent = true
+			if e.IPORevenue != 18_000_000_000 {
+				t.Fatalf("expected IPO revenue 18B, got %.2f", e.IPORevenue)
+			}
+		}
+	}
+
+	if !foundIPOEvent {
+		t.Fatalf("expected EventIPO for %s in EventLog", ipoCo.Symbol)
+	}
+}
+
+func TestMacroeconomicIntegration(t *testing.T) {
+	s := buildSmallSlice(t)
+	report := s.Step()
+
+	if report.Citizen.Population < 300_000_000 {
+		t.Fatalf("expected population >= 300M, got %f", report.Citizen.Population)
+	}
+	if report.National.GDP < 20_000_000_000_000 {
+		t.Fatalf("expected GDP >= 20T, got %f", report.National.GDP)
+	}
+	if report.National.FedFundsRate <= 0 {
+		t.Fatalf("expected positive Fed Funds Rate, got %f", report.National.FedFundsRate)
+	}
+
+	// Verify companies have macro footprint populated
+	for _, sym := range s.Symbols() {
+		co := s.Company(sym)
+		if co.Headcount <= 0 {
+			t.Errorf("company %s headcount <= 0", sym)
+		}
+		if co.LaborExpense <= 0 {
+			t.Errorf("company %s labor expense <= 0", sym)
+		}
+		if co.DebtOutstanding <= 0 {
+			t.Errorf("company %s debt <= 0", sym)
+		}
+	}
+}
+
