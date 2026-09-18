@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" width="32" height="32" fill="none">
+  <!-- Rounded tile backdrop in warm dark tone -->
+  <rect width="32" height="32" rx="7" fill="#181714"/>
+  <rect x="0.5" y="0.5" width="31" height="31" rx="6.5" stroke="#2c2b26" stroke-width="1"/>
+
+  <!-- Candlestick 1: Green up bar -->
+  <line x1="8.5" y1="12" x2="8.5" y2="24" stroke="#1f8a65" stroke-width="1.5" stroke-linecap="round"/>
+  <rect x="7" y="15" width="3" height="6" rx="0.75" fill="#1f8a65"/>
+
+  <!-- Candlestick 2: Retracement bar -->
+  <line x1="16" y1="10" x2="16" y2="22" stroke="#cf2d56" stroke-width="1.5" stroke-linecap="round"/>
+  <rect x="14.5" y="13" width="3" height="5" rx="0.75" fill="#cf2d56"/>
+
+  <!-- Candlestick 3: Signature orange breakout bar -->
+  <line x1="23.5" y1="6" x2="23.5" y2="20" stroke="#f54e00" stroke-width="1.5" stroke-linecap="round"/>
+  <rect x="22" y="8" width="3" height="8" rx="0.75" fill="#f54e00"/>
+
+  <!-- Dynamic upward trend curve -->
+  <path d="M5 21 C10 19, 13 14, 18 13 C21 12.5, 24 8, 27 6" stroke="#f54e00" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- Peak indicator signal dot -->
+  <circle cx="27" cy="6" r="1.75" fill="#ffffff"/>
+  <circle cx="27" cy="6" r="3" stroke="#f54e00" stroke-width="1" fill="none" opacity="0.6"/>
+</svg>

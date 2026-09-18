@@ -1,0 +1,32 @@
+[package]
+name = "economy"
+version = "0.1.0"
+edition = "2021"
+description = "Financial market simulation and interactive terminal platform"
+authors = ["EconomyMarkets Authors"]
+
+[lib]
+name = "economy"
+path = "src/lib.rs"
+
+[[bin]]
+name = "economy"
+path = "src/bin/economy.rs"
+
+[[bin]]
+name = "economy-server"
+path = "src/bin/server.rs"
+
+[dependencies]
+tokio = { version = "1.40", features = ["full"] }
+axum = { version = "0.8", features = ["ws"] }
+tower-http = { version = "0.6", features = ["cors", "fs"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+rand = "0.8"
+rand_distr = "0.4"
+clap = { version = "4.5", features = ["derive"] }
+chrono = { version = "0.4", features = ["serde"] }
+parking_lot = "0.12"
+futures-util = "0.3"
